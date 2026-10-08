@@ -1,0 +1,221 @@
+# Mosaic of Life Snapshot: all text of the page lives in this file.
+# Edit the text after the colons. Keep field names and indentation as they are.
+
+meta:
+  published: false   # false = hidden from search engines and the sample link is visible. Set true on launch day
+  site_url: https://mosaic.juliakrylova.com
+  title: "Mosaic of Life Snapshot | Julia Krylova"
+  description: "A two-minute self-assessment across the three pillars of the Mosaic of Life: your foundation, your professional path and your visibility."
+
+links:
+  calendly: https://calendly.com/juliakrylova/30min
+  main_site: https://www.juliakrylova.com
+
+backend:
+  endpoint_url: ""   # filled in at stage 2. Empty = nothing is sent anywhere
+
+logic:
+  balanced_gap: 3        # gap = 10 minus a pillar average. Balanced when every gap is below this number
+  tie_order: [F, P, V]   # which pillar comes first when two averages are equal
+
+intro:
+  wordmark: "MOSAIC OF LIFE SNAPSHOT"
+  headline: "Which part of your life needs you first?"
+  subhead: "A two-minute self-assessment across the three pillars of the Mosaic of Life: your foundation, your professional path and your visibility."
+  meta_line: "13 questions · 2 minutes · free"
+  start_label: "Start"
+  author_line: "Created by Julia Krylova, strategic mentor for women leaders, based on her Mosaic of Life Method™."
+  sample_label: "See a sample result"   # shown only while meta.published is false
+
+question:
+  prompt: "Where are you today?"
+  back_label: "Back"
+  scale:
+    - { value: 1, label: "a constant struggle" }
+    - { value: 5, label: "OK, but not thriving" }
+    - { value: 10, label: "strong, it fuels me" }
+
+pillars:
+  - key: F
+    name: "Foundation: Life Resilience"
+    short: "Foundation"
+    in_text: "Foundation"
+    items:
+      - title: "Energy & recovery"
+      - title: "Emotional resilience under pressure"
+      - title: "My calendar reflects my priorities"
+      - title: "Time for myself"
+        note: "Rest and space, without guilt"
+  - key: P
+    name: "Professional Fulfilment"
+    short: "Professional"
+    in_text: "Professional Fulfilment"
+    items:
+      - title: "Satisfaction with my current role"
+      - title: "Clarity on my next career move"
+        note: "In the next 2-3 years"
+      - title: "Financial independence & security"
+      - title: "Meaning & impact of my work"
+  - key: V
+    name: "Visibility, Presence, Status"
+    short: "Visibility"
+    in_text: "Visibility"
+    items:
+      - title: "Executive presence"
+        note: "I am calm, grounded, warm yet come across as authoritative"
+      - title: "Advocating for myself"
+        note: "Asking for promotion, pay, resources, credit"
+      - title: "External visibility"
+        note: "I'm comfortable being seen and expressing myself publicly: industry events, panels, LinkedIn"
+      - title: "Thought leadership"
+        note: "My ideas shape decisions"
+
+grow_question:   # question 13. Draft wording, waiting for Julia's OK
+  eyebrow: "YOUR PRIORITY"
+  title: "Which area would you most like to grow right now?"
+  subtitle: "Choose one."
+  options:
+    - key: F
+      label: "Foundation"
+      description: "Energy, time, resilience and the life around my work"
+    - key: P
+      label: "Professional path"
+      description: "My role, my direction and the meaning of my work"
+    - key: V
+      label: "Visibility"
+      description: "My presence, my voice, being seen and heard"
+
+email_step:
+  eyebrow: "ALMOST THERE"
+  title: "Your Mosaic is ready"
+  subtitle: "Tell me where to send your copy, and see your result right away."
+  name_label: "First name"
+  email_label: "Email"
+  consent_label: "Yes, I would like to receive letters from Julia. I can unsubscribe at any time."
+  submit_label: "Show my Mosaic"
+  data_note: "Mastermind Global B.V. uses your name and email to show you your result and send you a copy."
+  error_name: "Please enter your first name."
+  error_email: "Please enter a valid email address."
+
+result:
+  eyebrow: "YOUR MOSAIC OF LIFE SNAPSHOT"
+  greeting_with_name: "{name}, here is your Mosaic"
+  greeting: "Here is your Mosaic"
+  focus_label: "Your focus"
+  score_suffix: "/ 10"
+  legend_low: "Needs attention"
+  legend_high: "Strong"
+  grow_match: "You said you would most like to grow your {grow}, and your answers agree. Here is where to start."   # draft, waiting for Julia's OK
+  grow_mismatch: "You said you would most like to grow your {grow}. Your answers suggest starting with your {focus}. Here is why."   # draft, waiting for Julia's OK
+  section_labels:
+    what_it_means: "What it means"
+    how_it_affects: "How it affects the rest of your life mosaic"
+    whats_next: "What's next"
+    first_steps: "Your first three steps"
+  cta_button: "Book a free 30-minute call"
+  cta_note: "With Julia Krylova"
+  copy_line: "A copy of your results is on its way to {email}."
+  retake_label: "Retake the Snapshot"
+  signature_name: "Julia Krylova"
+  signature_title: "Strategic Mentor for Women Leaders · Founder, Mosaic of Life"
+  legal_line: "Mastermind Global B.V. · KVK 88166473"
+
+results:
+  F:
+    headline: "Your focus: your Foundation"
+    what_it_means: >-
+      Right now, you're giving more than you're getting back. It may feel like
+      running slightly on reserve: rest that doesn't quite restore you, and time
+      for yourself that keeps moving to next week.
+    how_it_affects:
+      - >-
+        Everything else in your mosaic rests on this. When your reserves are low,
+        even the things you're good at take more effort.
+      - >-
+        Decisions feel heavier, ambition can start to feel like pressure, and it's
+        harder to be fully present in the moments that matter most. It means your
+        foundation needs some of the attention you give everyone else.
+    steps:
+      - >-
+        Choose one moment this week that is just for recovery, and keep it the way
+        you'd keep a meeting with someone important.
+      - >-
+        Look back at last week. Notice what gave you energy and what drained you.
+        If you can, let go of one thing that took more than it gave.
+      - >-
+        Pick one task you can stop doing or hand over this month.
+    cta_question: "Curious how to rebuild your foundation without slowing down your career?"
+
+  P:
+    headline: "Your focus: your Professional Fulfilment"
+    what_it_means: >-
+      You're doing good work, and you know it. But the work itself isn't giving you
+      enough in return right now: a clear sense of direction, the feeling that it
+      matters, or the security you've earned.
+    how_it_affects:
+      - >-
+        When the path ahead isn't clear, a lot of energy quietly goes into wondering
+        and weighing options. It also makes it harder to ask for what you want, or to
+        show up visibly, because you're not yet sure what you're asking for. Once your
+        direction is clear, both become easier: your energy has a focus, and your ask
+        has a shape.
+    steps:
+      - >-
+        In a few sentences, describe what you'd like your work to look like in
+        2–3 years. And how would you want to feel?
+      - >-
+        Think of three moments this year when your work felt truly worthwhile.
+        What do they have in common?
+      - >-
+        Give financial security a number. What does "enough" look like for you,
+        concretely?
+    cta_question: "Want to see your next move from a bird's-eye view, with a plan to get there?"
+
+  V:
+    headline: "Your focus: your Visibility"
+    what_it_means: >-
+      The people who work closely with you know how good you are. The challenge is
+      that the people who make decisions may not see the full picture, and asking
+      for what you've earned may not come naturally to you.
+    how_it_affects:
+      - >-
+        Many capable leaders expect good work to speak for itself. Often, it doesn't.
+        Opportunities, promotions and recognition tend to go to the people who are
+        visible, not only to those who deliver. Over time, not being seen can quietly
+        wear down your energy, and even make you doubt a direction you were once
+        sure of.
+    steps:
+      - >-
+        Share one result with someone whose opinion shapes your next step. Talk about
+        the difference it made, not only the work behind it.
+      - >-
+        Prepare one ask: a project, a raise, a seat at the table. Write it down and
+        consider scheduling a conversation.
+      - >-
+        Say yes to one visible moment this month: a panel, a post, or presenting your
+        team's work yourself.
+    cta_question: "Want to see how to be recognised for the leader you already are, without feeling like you're bragging?"
+
+  balanced:
+    headline: "Your mosaic is in good balance"
+    what_it_means: >-
+      Right now, no area of your life is pulling the others down. That's less common
+      than it sounds, and it usually means you've made some careful choices along
+      the way.
+    whats_next:
+      - >-
+        A balanced mosaic is a good moment to ask a different question: not what needs
+        fixing, but what you'd like to grow into next.
+      - >-
+        A bigger role, a venture of your own, or simply more of what already works?
+        Balance is easier to keep when you know where you're heading.
+    steps:
+      - >-
+        Notice which of your scores feels most alive right now. It's often a clue to
+        what you'd like more of.
+      - >-
+        Write down one ambition you've been saving for "the right time." Then ask
+        yourself what the right time would actually look like.
+      - >-
+        Name one habit or boundary that keeps your mosaic in balance, and protect it.
+    cta_question: "Curious what your next chapter could look like?"
