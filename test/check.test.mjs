@@ -7,10 +7,11 @@ const copy = () => structuredClone(content);
 const errorsOf = (c) => checkContent(c).errors;
 const hasError = (errors, path) => errors.some((e) => e.startsWith(`${path}:`));
 
-test('the real content file passes with no errors and no TODO markers', () => {
+// TODO markers are not asserted here on purpose: while published is false a TODO is only
+// a reminder, and this test must not block the deploy when Julia leaves one in the yaml.
+test('the real content file passes with no errors', () => {
   const { errors, todos } = checkContent(content);
   assert.deepEqual(errors, []);
-  assert.deepEqual(todos, []);
   assert.equal(report(content, { errors, todos }).ok, true);
 });
 
@@ -97,6 +98,24 @@ test('a TODO is listed, blocks only when published is true', () => {
   const published = report(c, checkContent(c));
   assert.equal(published.ok, false);
   assert.ok(published.lines.some((line) => line.includes('TODO markers remain')));
+});
+
+test('links must be full web addresses, the endpoint empty or https', () => {
+  const c = copy();
+  c.links.calendly = 'calendly.com/juliakrylova/30min';
+  assert.ok(hasError(errorsOf(c), 'links.calendly'));
+  const d = copy();
+  d.meta.site_url = 'mosaic.juliakrylova.com';
+  assert.ok(hasError(errorsOf(d), 'meta.site_url'));
+  const e = copy();
+  e.backend.endpoint_url = '   ';
+  assert.deepEqual(errorsOf(e), []);
+  const f = copy();
+  f.backend.endpoint_url = 'http://script.google.com/macros/s/abc/exec';
+  assert.ok(hasError(errorsOf(f), 'backend.endpoint_url'));
+  const g = copy();
+  g.backend.endpoint_url = 'https://script.google.com/macros/s/abc/exec';
+  assert.deepEqual(errorsOf(g), []);
 });
 
 test('published must be true or false', () => {

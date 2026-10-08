@@ -16,13 +16,18 @@ export function readSrc(search) {
   return sanitizeSrc(params.get('src') || '');
 }
 
+// The content check guarantees a full address; if it ever is not one, the link is used as is.
 export function calendlyUrl(base, { src, result }) {
-  const url = new URL(base);
-  url.searchParams.set('utm_source', 'mosaic-snapshot');
-  url.searchParams.set('utm_medium', 'result');
-  url.searchParams.set('utm_campaign', src || 'direct');
-  url.searchParams.set('utm_content', result);
-  return url.toString();
+  try {
+    const url = new URL(base);
+    url.searchParams.set('utm_source', 'mosaic-snapshot');
+    url.searchParams.set('utm_medium', 'result');
+    url.searchParams.set('utm_campaign', src || 'direct');
+    url.searchParams.set('utm_content', result);
+    return url.toString();
+  } catch {
+    return base;
+  }
 }
 
 // { F1: 4, F2: 3, ... V4: 6 } in question order.
@@ -37,6 +42,19 @@ export function answerMap(answers, pillars) {
   return map;
 }
 
+// Payload sent to the stage 2 endpoint (Google Apps Script), version 1:
+// {
+//   "version": 1,
+//   "submitted_at": "2026-10-08T10:00:00.000Z",
+//   "name": "Anna",
+//   "email": "anna@example.com",
+//   "consent": false,
+//   "src": "",
+//   "grow": "F|P|V",
+//   "result": "F|P|V|balanced",
+//   "averages": { "F": 4, "P": 7, "V": 6 },
+//   "answers": { "F1": 4, "F2": 3, "F3": 5, "F4": 4, "P1": 7, "P2": 6, "P3": 8, "P4": 7, "V1": 6, "V2": 5, "V3": 7, "V4": 6 }
+// }
 export function buildPayload({ name, email, consent, src, grow, evaluation, answers, pillars, submittedAt }) {
   const averages = {};
   for (const key of Object.keys(evaluation.averages)) {
@@ -57,10 +75,12 @@ export function buildPayload({ name, email, consent, src, grow, evaluation, answ
 }
 
 // Fire-and-forget. Never blocks the result and never shows an error to the person.
+// A blank or whitespace-only address means: send nothing.
 export function sendPayload(payload, endpointUrl, fetchImpl = globalThis.fetch) {
-  if (!endpointUrl || typeof fetchImpl !== 'function') return Promise.resolve(false);
+  const url = typeof endpointUrl === 'string' ? endpointUrl.trim() : '';
+  if (!url || typeof fetchImpl !== 'function') return Promise.resolve(false);
   try {
-    return fetchImpl(endpointUrl, {
+    return fetchImpl(url, {
       method: 'POST',
       mode: 'no-cors',
       keepalive: true,

@@ -59,11 +59,14 @@ export function renderMosaic(content, evaluation) {
       if (isFocus) append(flag, [el('span', { class: 'mosaic__dot', 'aria-hidden': 'true' }), content.result.focus_label]);
       column.append(flag);
     }
-    const tiles = el('div', { class: 'mosaic__tiles', 'aria-hidden': 'true' });
+    const tiles = el('div', { class: 'mosaic__tiles' });
     pillar.items.forEach((item, position) => {
       const score = evaluation.grouped[pillar.key][position];
       const node = tile('mosaic__tile', TILE_HEIGHTS[pillar.key][position], tileAlpha(score));
-      node.title = `${item.title}: ${score} ${content.result.score_suffix}`;
+      const label = `${item.title}: ${score} ${content.result.score_suffix}`;
+      node.title = label;
+      node.setAttribute('role', 'img');
+      node.setAttribute('aria-label', label);
       node.style.animationDelay = `${tileDelay(questionIndex)}ms`;
       tiles.append(node);
       questionIndex += 1;

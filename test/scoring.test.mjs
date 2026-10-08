@@ -4,13 +4,15 @@ import { loadContent } from '../src/check.mjs';
 import { evaluate, growLineKind, formatAverage, fillTemplate, pickFocus, groupAnswers } from '../src/app/scoring.js';
 
 const content = await loadContent();
+// The spec table assumes the agreed logic; pin it so an edit to logic in the yaml cannot break these tests.
+const agreed = { ...content, logic: { balanced_gap: 3, tie_order: ['F', 'P', 'V'] } };
 
 // Four scores per pillar; a single number means that score four times.
 function answers({ F, P, V }) {
   const four = (x) => (Array.isArray(x) ? x : [x, x, x, x]);
   return [...four(F), ...four(P), ...four(V)];
 }
-const run = (scores) => evaluate(answers(scores), content);
+const run = (scores) => evaluate(answers(scores), agreed);
 
 test('all 10: balanced', () => {
   const r = run({ F: 10, P: 10, V: 10 });
@@ -54,7 +56,7 @@ test('F 8,7,7,7; P 8,7,7,7; V 7,7,7,7: V (gap 3 against 2.75)', () => {
 });
 
 test('sample answers from the first screen: focus F', () => {
-  const r = evaluate([4, 3, 5, 4, 7, 6, 8, 7, 6, 5, 7, 6], content);
+  const r = evaluate([4, 3, 5, 4, 7, 6, 8, 7, 6, 5, 7, 6], agreed);
   assert.equal(r.result, 'F');
   assert.deepEqual(r.averages, { F: 4, P: 7, V: 6 });
   assert.equal(growLineKind(r.result, 'V'), 'mismatch');

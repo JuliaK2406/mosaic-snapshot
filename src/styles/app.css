@@ -391,10 +391,11 @@ a {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .field label {
+  display: block;
+  margin-bottom: 6px;
   font-size: 14px;
   font-weight: 500;
 }
@@ -414,14 +415,17 @@ a {
   border-color: var(--aubergine);
 }
 
+/* Never display:none: the empty live region must already be in the accessibility tree
+   when the error text arrives, otherwise screen readers do not announce it. */
 .field__error {
+  margin-top: 6px;
   font-size: 13px;
   line-height: 1.4;
   color: var(--aubergine);
 }
 
 .field__error:empty {
-  display: none;
+  margin-top: 0;
 }
 
 .consent {

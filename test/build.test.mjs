@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadContent } from '../src/check.mjs';
-import { pageHtml, embedJson, bundle, faviconSvg, escapeHtml } from '../src/build.mjs';
+import { pageHtml, embedJson, bundle, faviconSvg, escapeHtml, readToken } from '../src/build.mjs';
 
 const content = await loadContent();
 
@@ -15,10 +15,10 @@ test('unpublished page carries noindex, published page does not', () => {
 test('head has lang, title, description and og tags, all paths relative', () => {
   const html = pageHtml(content);
   assert.ok(html.includes('<html lang="en">'));
-  assert.ok(html.includes(`<title>${content.meta.title}</title>`));
-  assert.ok(html.includes(`<meta name="description" content="${content.meta.description}">`));
-  assert.ok(html.includes(`<meta property="og:title" content="${content.meta.title}">`));
-  assert.ok(html.includes(`<meta property="og:description" content="${content.meta.description}">`));
+  assert.ok(html.includes(`<title>${escapeHtml(content.meta.title)}</title>`));
+  assert.ok(html.includes(`<meta name="description" content="${escapeHtml(content.meta.description)}">`));
+  assert.ok(html.includes(`<meta property="og:title" content="${escapeHtml(content.meta.title)}">`));
+  assert.ok(html.includes(`<meta property="og:description" content="${escapeHtml(content.meta.description)}">`));
   assert.ok(html.includes('href="./styles.css"'));
   assert.ok(html.includes('src="./app.js"'));
   assert.ok(html.includes('href="./favicon.svg"'));
@@ -50,8 +50,26 @@ test('bundle strips relative imports and export keywords, refuses anything else'
   assert.throws(() => bundle([{ name: 'y.js', code: "import fs from 'node:fs';\n" }]), /y\.js/);
 });
 
+test('bundle refuses an unlisted module, a wrong order, a duplicate name and a syntax error', () => {
+  assert.throws(() => bundle([{ name: 'a.js', code: "import { x } from './util.js';\n" }]), /not in the module list/);
+  assert.throws(() => bundle([
+    { name: 'a.js', code: "import { b } from './b.js';\n" },
+    { name: 'b.js', code: 'export const b = 1;\n' },
+  ]), /must come earlier/);
+  assert.throws(() => bundle([
+    { name: 'a.js', code: 'export function same() {}\n' },
+    { name: 'b.js', code: 'function same() {}\n' },
+  ]), /already declared in a\.js/);
+  assert.throws(() => bundle([{ name: 'a.js', code: 'function broken( {\n' }]), /does not parse/);
+});
+
+test('colour tokens are read from tokens.css', () => {
+  assert.equal(readToken(':root {\n  --aubergine: #5E1A4D;\n}', '--aubergine'), '#5E1A4D');
+  assert.throws(() => readToken(':root {}', '--missing'), /not found/);
+});
+
 test('favicon is a 3x3 mosaic', () => {
-  const svg = faviconSvg();
+  const svg = faviconSvg('#5E1A4D');
   assert.equal(svg.split('<rect').length - 1, 9);
   assert.ok(svg.includes('fill="#5E1A4D"'));
 });

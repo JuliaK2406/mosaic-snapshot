@@ -4,6 +4,7 @@
 import { readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { ROOT, loadContent, checkContent, report } from './check.mjs';
 import { ICON_ALPHAS } from './app/mosaic.js';
 
@@ -29,22 +30,52 @@ export function embedJson(value) {
     .replace(/\u2029/g, '\\u2029');
 }
 
-// Joins the ES modules into one file. Only relative imports and "export function/const/let/class"
-// are supported, which is all the app uses. Anything else stops the build.
-export function bundle(sources) {
-  const parts = [];
-  for (const { name, code } of sources) {
-    const stripped = code
-      .replace(/^import\s[\s\S]*?\sfrom\s+'\.\/[^']+';[ \t]*$/gm, '')
-      .replace(/^export\s+(?=(?:async\s+)?function\s|const\s|let\s|class\s)/gm, '');
-    const leftover = stripped.match(/^\s*(import|export)\b/m);
-    if (leftover) throw new Error(`${name}: the bundler cannot handle this ${leftover[1]} statement`);
-    parts.push(`// ---- ${name} ----\n${stripped.trim()}\n`);
-  }
-  return parts.join('\n');
+// Reads one colour token (#rrggbb) from tokens.css, so no colour is written twice.
+export function readToken(css, name) {
+  const match = css.match(new RegExp(name + '\\s*:\\s*(#[0-9A-Fa-f]{6})'));
+  if (!match) throw new Error(`tokens.css: ${name} not found`);
+  return match[1];
 }
 
-export function pageHtml(content) {
+// Joins the ES modules into one file in the given order. Supported: named imports from a module
+// listed earlier ("import { a } from './x.js';") and "export function/const/let/class".
+// Any other import or export, an import of an unlisted module, a top-level name declared in two
+// modules, or a syntax error in the result stops the build.
+export function bundle(sources) {
+  const names = sources.map((source) => source.name);
+  const declared = new Map();
+  const parts = [];
+  sources.forEach(({ name, code }, position) => {
+    const imports = [];
+    let stripped = code.replace(/^import\s*\{[^}]*\}\s*from\s*'\.\/([^']+)';[ \t]*$/gm, (match, target) => {
+      imports.push(target);
+      return '';
+    });
+    for (const target of imports) {
+      const at = names.indexOf(target);
+      if (at < 0) throw new Error(`${name}: imports ${target}, which is not in the module list`);
+      if (at >= position) throw new Error(`${name}: imports ${target}, which must come earlier in the module list`);
+    }
+    stripped = stripped.replace(/^export\s+(?=(?:async\s+)?function\s|const\s|let\s|class\s)/gm, '');
+    const leftover = stripped.match(/^\s*(import|export)\b/m);
+    if (leftover) throw new Error(`${name}: the bundler cannot handle this ${leftover[1]} statement`);
+    for (const match of stripped.matchAll(/^(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/gm)) {
+      const id = match[1];
+      if (declared.has(id)) throw new Error(`${name}: top-level name "${id}" is already declared in ${declared.get(id)}`);
+      declared.set(id, name);
+    }
+    parts.push(`// ---- ${name} ----\n${stripped.trim()}\n`);
+  });
+  const output = parts.join('\n');
+  try {
+    new vm.Script(`'use strict';\n${output}`, { filename: 'app.js' });
+  } catch (error) {
+    throw new Error(`app.js does not parse: ${error.message}`);
+  }
+  return output;
+}
+
+export function pageHtml(content, { themeColor = '#FAF8F5' } = {}) {
   const m = content.meta;
   const robots = m.published ? '' : '  <meta name="robots" content="noindex, nofollow">\n';
   return `<!doctype html>
@@ -57,8 +88,7 @@ export function pageHtml(content) {
 ${robots}  <meta property="og:title" content="${escapeHtml(m.title)}">
   <meta property="og:description" content="${escapeHtml(m.description)}">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="${escapeHtml(m.site_url)}">
-  <meta name="theme-color" content="#FAF8F5">
+  <meta name="theme-color" content="${themeColor}">
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -75,11 +105,11 @@ ${robots}  <meta property="og:title" content="${escapeHtml(m.title)}">
 }
 
 // The same 3x3 mini mosaic as the brand icon on the first screen.
-export function faviconSvg() {
+export function faviconSvg(colour = '#5E1A4D') {
   const cells = ICON_ALPHAS.map((alpha, i) => {
     const x = (i % 3) * 11;
     const y = Math.floor(i / 3) * 11;
-    return `<rect x="${x}" y="${y}" width="10" height="10" rx="1.5" fill="#5E1A4D" fill-opacity="${alpha}"/>`;
+    return `<rect x="${x}" y="${y}" width="10" height="10" rx="1.5" fill="${colour}" fill-opacity="${alpha}"/>`;
   }).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${cells}</svg>\n`;
 }
@@ -94,12 +124,13 @@ export async function build() {
   for (const name of MODULES) sources.push({ name, code: await readFile(path.join(APP_DIR, name), 'utf8') });
   const styles = [];
   for (const name of STYLES) styles.push(`/* ---- ${name} ---- */\n${await readFile(path.join(STYLES_DIR, name), 'utf8')}`);
+  const tokens = await readFile(path.join(STYLES_DIR, 'tokens.css'), 'utf8');
 
   const files = {
-    'index.html': pageHtml(content),
+    'index.html': pageHtml(content, { themeColor: readToken(tokens, '--porcelain') }),
     'app.js': bundle(sources),
     'styles.css': styles.join('\n'),
-    'favicon.svg': faviconSvg(),
+    'favicon.svg': faviconSvg(readToken(tokens, '--aubergine')),
   };
   if (!content.meta.published) files['robots.txt'] = ROBOTS_TXT;
 

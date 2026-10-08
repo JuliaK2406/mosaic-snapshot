@@ -21,8 +21,9 @@ test('src is read from the query string and is empty without the parameter', () 
 });
 
 test('Calendly link carries the utm tags, with "direct" when there is no src', () => {
+  const base = new URL(content.links.calendly);
   const direct = new URL(calendlyUrl(content.links.calendly, { src: '', result: 'F' }));
-  assert.equal(direct.origin + direct.pathname, content.links.calendly);
+  assert.equal(direct.origin + direct.pathname, base.origin + base.pathname);
   assert.equal(direct.searchParams.get('utm_source'), 'mosaic-snapshot');
   assert.equal(direct.searchParams.get('utm_medium'), 'result');
   assert.equal(direct.searchParams.get('utm_campaign'), 'direct');
@@ -30,6 +31,10 @@ test('Calendly link carries the utm tags, with "direct" when there is no src', (
   const tagged = new URL(calendlyUrl(content.links.calendly, { src: 'workshop-a', result: 'balanced' }));
   assert.equal(tagged.searchParams.get('utm_campaign'), 'workshop-a');
   assert.equal(tagged.searchParams.get('utm_content'), 'balanced');
+});
+
+test('a link that is not a full address is returned unchanged instead of throwing', () => {
+  assert.equal(calendlyUrl('calendly.com/x', { src: '', result: 'F' }), 'calendly.com/x');
 });
 
 test('answer map uses F1..V4 keys in question order', () => {
@@ -73,10 +78,12 @@ test('payload stamps the current time when none is given', () => {
   assert.equal(payload.result, 'balanced');
 });
 
-test('nothing is sent while the endpoint is empty', async () => {
+test('nothing is sent while the endpoint is empty or only whitespace', async () => {
   let calls = 0;
-  const sent = await sendPayload({ version: 1 }, '', () => { calls += 1; return Promise.resolve(); });
-  assert.equal(sent, false);
+  const spy = () => { calls += 1; return Promise.resolve(); };
+  assert.equal(await sendPayload({ version: 1 }, '', spy), false);
+  assert.equal(await sendPayload({ version: 1 }, '   ', spy), false);
+  assert.equal(await sendPayload({ version: 1 }, undefined, spy), false);
   assert.equal(calls, 0);
 });
 

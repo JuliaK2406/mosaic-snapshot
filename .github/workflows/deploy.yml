@@ -1,6 +1,8 @@
 # Builds the page and publishes dist/ to GitHub Pages.
 # Runs on every push to main and by hand (Actions -> Deploy -> Run workflow).
 # Playwright is a devDependency and is not installed here: tests use node:test only.
+# Action versions follow GitHub's own Pages starter workflow (deploy-pages v5,
+# upload-pages-artifact v3) plus the current majors of checkout and setup-node.
 
 name: Deploy to GitHub Pages
 
@@ -16,14 +18,14 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -42,4 +44,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

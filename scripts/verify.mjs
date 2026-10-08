@@ -114,6 +114,8 @@ try {
       const tiles = await page.evaluate(() => [...document.querySelectorAll('.mosaic__tile')].map((tile) => ({
         h: tile.style.height,
         title: tile.title,
+        label: tile.getAttribute('aria-label'),
+        role: tile.getAttribute('role'),
         delay: tile.style.animationDelay,
         opacity: getComputedStyle(tile).opacity,
         bg: getComputedStyle(tile).backgroundColor,
@@ -123,6 +125,9 @@ try {
       check(`result ${key}: tile delays are 150 + rank x 85 ms`, tiles.every((tile, i) => tile.delay === `${150 + TILE_RANKS[i] * 85}ms`));
       const titles = content.pillars.flatMap((p, pi) => p.items.map((item, j) => `${item.title}: ${c.answers[pi * 4 + j]} ${r.score_suffix}`));
       check(`result ${key}: tile titles read "item: score / 10"`, JSON.stringify(tiles.map((tile) => tile.title)) === JSON.stringify(titles));
+      check(`result ${key}: tiles are readable by assistive tech (role img with the same label)`, tiles.every((tile) => tile.role === 'img' && tile.label === tile.title));
+      const headings = await page.evaluate(() => [...document.querySelectorAll('#app h1, #app h2, #app h3')].map((h) => h.tagName));
+      check(`result ${key}: one h1, then h2 and h3 sections`, headings.filter((h) => h === 'H1').length === 1 && headings[0] === 'H1' && headings.includes('H2') && headings.includes('H3'), headings.join(' '));
       const alphaOk = tiles.every((tile, i) => {
         const score = c.answers[i];
         const alpha = 0.12 + (0.88 * (score - 1)) / 9;
@@ -242,6 +247,8 @@ try {
     await start(page);
     await answer(page, new Array(12).fill(6));
     await grow(page, 'P');
+    const liveRegions = await page.evaluate(() => [...document.querySelectorAll('.field__error')].map((n) => ({ display: getComputedStyle(n).display, height: n.getBoundingClientRect().height, text: n.textContent })));
+    check('empty error regions stay in the accessibility tree (not display:none) and take no space', liveRegions.length === 2 && liveRegions.every((r) => r.display !== 'none' && r.height === 0 && r.text === ''), JSON.stringify(liveRegions));
     await submit(page);
     const state = await page.evaluate(() => ({
       nameError: document.getElementById('name-error').textContent,
@@ -267,15 +274,33 @@ try {
     const emailOnly = await page.evaluate(() => ({ n: document.getElementById('name-error').textContent, e: document.getElementById('email-error').textContent, f: document.activeElement.id }));
     check('bad email only: only the email error shows and gets focus', emailOnly.n === '' && emailOnly.e === content.email_step.error_email && emailOnly.f === 'email');
     await page.getByLabel(labels.email, { exact: true }).fill('anna@example.com');
-    await page.getByLabel(labels.email, { exact: true }).press('Enter');
+    await page.evaluate(() => {
+      const form = document.querySelector('form');
+      form.requestSubmit();
+      form.requestSubmit();
+    });
     await waitStep(page, 'result');
-    check('valid form submits with Enter and shows the result', true);
+    await page.waitForTimeout(900);
+    const afterDouble = await page.evaluate(() => ({ step: document.getElementById('app').dataset.step, heads: document.querySelectorAll('.result__head').length, host: location.host }));
+    check('a double submit shows one result and stays on the site', afterDouble.step === 'result' && afterDouble.heads === 1 && afterDouble.host === new URL(url).host, JSON.stringify(afterDouble));
+    await page.goBack();
+    await waitStep(page, 'intro');
+    check('after a double submit, one back returns to the first screen', true);
     await context.close();
   });
 
   // ---------- transitions and history ----------
   await section('history', async () => {
     const { page, context } = await open();
+    await page.evaluate(() => {
+      const button = document.querySelector('.btn--primary');
+      button.click();
+      button.click();
+    });
+    await waitStep(page, 'q', 0);
+    await page.goBack();
+    await waitStep(page, 'intro');
+    check('a double tap on Start adds one history entry, one back returns to the first screen', true);
     await start(page);
     await page.evaluate(() => {
       const rates = document.querySelectorAll('.rate');
@@ -306,6 +331,15 @@ try {
     await waitStep(page, 'q', 0);
     const forwardKept = await page.evaluate(() => [...document.querySelectorAll('.rate')].findIndex((b) => b.classList.contains('is-selected')) + 1);
     check('forward from the first screen restores question 1 with its answer', forwardKept === 5, `selected ${forwardKept}`);
+    await answer(page, [5, 5, 5], 0);
+    await page.reload({ waitUntil: 'networkidle' });
+    await waitStep(page, 'intro');
+    await page.waitForTimeout(300);
+    const afterReload = await page.evaluate(() => ({ step: document.getElementById('app').dataset.step, depth: window.history.state && window.history.state.depth }));
+    check('a reload in the middle of the questions shows the first screen with a clean history position', afterReload.step === 'intro' && afterReload.depth === 0, JSON.stringify(afterReload));
+    await start(page);
+    const freshAfterReload = await page.evaluate(() => document.querySelectorAll('.rate.is-selected').length);
+    check('after the reload the answers are gone', freshAfterReload === 0);
     await context.close();
   });
 

@@ -38,6 +38,7 @@ let transition = null;   // timer of the 250 ms highlight before the next screen
 let unwinding = null;    // callback waiting for history.go() to land on the first screen
 let backLock = null;     // ignores a second Back tap until the first one has landed
 let questionRefs = null; // live nodes of the mounted question screen
+let submitting = false;  // a result is being prepared; further submits are ignored
 
 // ---------- history ----------
 
@@ -93,13 +94,15 @@ function go(step, patch = {}) {
 
 function goBack() {
   clearTransition();
+  if (state.depth > 0) lockedBack();
+  else showIntro();
+}
+
+// One history.back() at a time: a second tap before the popstate lands would leave the site.
+function lockedBack() {
   if (backLock) return;
-  if (state.depth > 0) {
-    backLock = setTimeout(releaseBackLock, BACK_LOCK_MS);
-    window.history.back();
-  } else {
-    showIntro();
-  }
+  backLock = setTimeout(releaseBackLock, BACK_LOCK_MS);
+  window.history.back();
 }
 
 function showIntro() {
@@ -252,6 +255,7 @@ function authorLine() {
 }
 
 function start() {
+  if (state.step !== 'intro') return;
   go('q', { qi: 0 });
 }
 
@@ -262,7 +266,7 @@ function questionScreen() {
   const refs = {
     ...topBar({ step: state.qi + 1, showProgress: true }),
     pillar: el('span', { class: 'eyebrow eyebrow--pillar' }),
-    title: el('h2', { class: 'heading', id: 'question-title', tabindex: '-1', 'data-focus-target': '' }),
+    title: el('h1', { class: 'heading', id: 'question-title', tabindex: '-1', 'data-focus-target': '' }),
     note: el('p', { class: 'note' }),
     buttons: [],
   };
@@ -337,7 +341,7 @@ function growScreen() {
     progress.progress,
     el('div', { class: 'question__head' }, [
       el('span', { class: 'eyebrow', text: q.eyebrow }),
-      el('h2', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: q.title }),
+      el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: q.title }),
       el('p', { class: 'note', text: q.subtitle }),
     ]),
     el('div', { class: 'cards' }, buttons.map((entry) => entry.button)),
@@ -414,7 +418,7 @@ function emailScreen() {
     topBar({ step: TOTAL_STEPS, showProgress: false }).bar,
     el('div', { class: 'question__head question__head--email' }, [
       el('span', { class: 'eyebrow', text: t.eyebrow }),
-      el('h2', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: t.title }),
+      el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: t.title }),
       el('p', { class: 'note', text: t.subtitle }),
     ]),
     form,
@@ -461,6 +465,8 @@ function showSample() {
 }
 
 function showResult(sample) {
+  if (submitting) return;
+  submitting = true;
   state.sample = sample;
   state.evaluation = evaluate(state.answers, content);
   if (!sample) {
@@ -480,6 +486,7 @@ function showResult(sample) {
     state.step = 'result';
     pushEntry('result');
     render();
+    submitting = false;
   });
 }
 
@@ -491,7 +498,7 @@ function resultScreen() {
   const screen = el('section', { class: 'screen screen--result' });
   const greeting = state.name ? fillTemplate(r.greeting_with_name, { name: state.name }) : r.greeting;
 
-  const body = el('div', { class: 'result__body rise' }, [el('h3', { class: 'heading-sm', text: texts.headline })]);
+  const body = el('div', { class: 'result__body rise' }, [el('h2', { class: 'heading-sm', text: texts.headline })]);
   const lineKind = growLineKind(key, state.grow);
   if (lineKind) {
     const template = lineKind === 'match' ? r.grow_match : r.grow_mismatch;
@@ -504,7 +511,7 @@ function resultScreen() {
   body.append(section(r.section_labels.first_steps, [], el('ol', { class: 'steps' }, texts.steps.map((step) => el('li', { text: step })))));
 
   const cta = el('div', { class: 'cta' }, [
-    el('h3', { class: 'cta__question', text: texts.cta_question }),
+    el('h2', { class: 'cta__question', text: texts.cta_question }),
     el('a', {
       class: 'btn btn--primary',
       href: calendlyUrl(content.links.calendly, { src, result: key }),
@@ -528,7 +535,7 @@ function resultScreen() {
   append(screen, [
     el('div', { class: 'result__head' }, [
       el('span', { class: 'eyebrow', text: r.eyebrow }),
-      el('h2', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: greeting }),
+      el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: greeting }),
     ]),
     el('div', { class: 'result__mosaic' }, [renderMosaic(content, evaluation), renderLegend(content)]),
     body,
@@ -540,7 +547,7 @@ function resultScreen() {
 
 function section(label, paragraphs, extra) {
   return el('div', { class: 'section' }, [
-    el('h4', { class: 'section__label', text: label }),
+    el('h3', { class: 'section__label', text: label }),
     ...paragraphs.map((text) => el('p', { text })),
     extra,
   ]);
@@ -549,7 +556,7 @@ function section(label, paragraphs, extra) {
 function retake() {
   clearTransition();
   if (state.depth > 0) {
-    window.history.back();
+    lockedBack();
   } else {
     resetAnswers();
     showIntro();
@@ -559,4 +566,10 @@ function retake() {
 // ---------- start ----------
 
 if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+// After a reload in the middle of the questions the old entries are still in history:
+// show the first screen, then walk back to where that run began, so Back behaves normally.
+const previousEntry = window.history.state;
 showIntro();
+if (previousEntry && Number.isInteger(previousEntry.depth) && previousEntry.depth > 0) {
+  window.history.go(-previousEntry.depth);
+}

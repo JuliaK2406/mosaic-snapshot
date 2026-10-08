@@ -17,11 +17,12 @@ export async function loadContent(file = CONTENT_FILE) {
   return load(await readFile(file, 'utf8'));
 }
 
-// Required fields. 'string' means a non-empty text. Nested objects are checked recursively.
+// Required fields. 'string' means a non-empty text, 'url' a full web address.
+// Nested objects are checked recursively.
 const SHAPE = {
-  meta: { published: 'boolean', site_url: 'string', title: 'string', description: 'string' },
-  links: { calendly: 'string', main_site: 'string' },
-  backend: { endpoint_url: 'string-or-empty' },
+  meta: { published: 'boolean', site_url: 'url', title: 'string', description: 'string' },
+  links: { calendly: 'url', main_site: 'url' },
+  backend: { endpoint_url: 'url-or-empty' },
   logic: { balanced_gap: 'number', tie_order: 'tie-order' },
   intro: {
     wordmark: 'string',
@@ -84,6 +85,16 @@ const isString = (value) => typeof value === 'string';
 const isFilled = (value) => isString(value) && value.trim() !== '';
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+function isWebUrl(value, protocols = ['https:', 'http:']) {
+  if (!isFilled(value)) return false;
+  try {
+    const url = new URL(value.trim());
+    return protocols.includes(url.protocol) && url.hostname !== '';
+  } catch {
+    return false;
+  }
+}
+
 export function checkContent(content) {
   if (!isObject(content)) return { errors: ['content: the file is not a list of fields'], todos: [] };
   const errors = [];
@@ -132,8 +143,12 @@ function checkKind(value, kind, at, fail) {
     case 'string':
       if (!isFilled(value)) fail(at, 'must be a non-empty text');
       break;
-    case 'string-or-empty':
+    case 'url':
+      if (!isWebUrl(value)) fail(at, 'must be a full address starting with https:// or http://');
+      break;
+    case 'url-or-empty':
       if (!isString(value)) fail(at, 'must be text (empty is allowed)');
+      else if (value.trim() !== '' && !isWebUrl(value, ['https:'])) fail(at, 'must be empty or a full https:// address');
       break;
     case 'boolean':
       if (typeof value !== 'boolean') fail(at, 'must be true or false');
