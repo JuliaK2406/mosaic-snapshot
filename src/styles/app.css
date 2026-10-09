@@ -699,6 +699,7 @@ a {
 
 @media (prefers-reduced-motion: reduce) {
   .mosaic__tile,
+  .teaser__tile,
   .rise {
     animation: none;
   }
@@ -707,5 +708,393 @@ a {
   .rate,
   .card {
     transition: none;
+  }
+}
+
+/* ======================================================================
+   Stage 2: wrappers, the blurred mosaic on the email screen, the live mosaic
+   and the wide layout from 900 px. Below 900 px every screen except email
+   renders exactly as before: the wrappers are display: contents and the
+   asides are hidden.
+   ====================================================================== */
+
+.screen__main,
+.result__left,
+.result__right {
+  display: contents;
+}
+
+.screen__aside,
+.cta-card {
+  display: none;
+}
+
+/* ---------- email screen: title with the blurred mosaic beside it ---------- */
+
+.email__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  row-gap: 10px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.email__text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.email__head > .note {
+  grid-column: 1 / -1;
+}
+
+.mosaic-blur {
+  --mosaic-scale: 0.42;
+  width: 96px;
+  filter: blur(4.5px);
+  pointer-events: none;
+}
+
+.mosaic-blur--large {
+  display: none;
+}
+
+.mosaic--plain {
+  gap: calc(16px * var(--mosaic-scale));
+}
+
+.mosaic--plain .mosaic__col {
+  gap: 0;
+  padding: 0;
+  border: 0;
+}
+
+.mosaic--plain .mosaic__tiles {
+  gap: calc(var(--tile-gap) * var(--mosaic-scale));
+}
+
+.mosaic--plain .mosaic__tile {
+  border-radius: calc(var(--radius-tile) * var(--mosaic-scale));
+  animation: none;
+}
+
+/* ---------- live mosaic beside the questions (wide screens only) ---------- */
+
+.mosaic--live {
+  width: 100%;
+  max-width: 440px;
+}
+
+.mosaic--live .mosaic__col {
+  gap: 8px;
+  padding: 0;
+  border: 0;
+}
+
+.mosaic--live .mosaic__tiles {
+  gap: calc(var(--tile-gap) * var(--mosaic-scale));
+}
+
+.mosaic--live .mosaic__tile {
+  border: 1px solid var(--control-border);
+  border-radius: calc(var(--radius-tile) * var(--mosaic-scale));
+  background: transparent;
+  animation: none;
+}
+
+.mosaic--live .mosaic__tile.is-current {
+  border: 2px solid var(--navy);
+}
+
+.mosaic--live .mosaic__tile.is-answered {
+  background: rgba(var(--aubergine-rgb), 0.35);
+  border-color: transparent;
+  animation: live-fill 0.3s ease-out both;
+}
+
+.mosaic--live .mosaic__tile.is-answered.is-current {
+  border-color: var(--navy);
+}
+
+.mosaic--live .mosaic__tile.is-settled {
+  animation: none;
+}
+
+@keyframes live-fill {
+  from {
+    opacity: 0.3;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- large decorative mosaic of the first screen (wide screens only) ---------- */
+
+.teaser--large {
+  --mosaic-scale: 3;
+  width: 100%;
+  max-width: 440px;
+  gap: calc(8px * var(--mosaic-scale) / 3);
+}
+
+.teaser--large .teaser__col {
+  gap: calc(var(--tile-gap) * var(--mosaic-scale) / 2);
+}
+
+.teaser--large .teaser__tile {
+  border-radius: calc(var(--radius-tile) * 1.5);
+  animation: tile-in 0.55s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* ---------- wide layout ---------- */
+
+@media (min-width: 900px) {
+  .screen {
+    max-width: calc(1120px + 96px);
+    padding: 48px;
+    justify-content: center;
+  }
+
+  .screen--intro,
+  .screen--question,
+  .screen--email {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    column-gap: clamp(64px, 7vw, 96px);
+    align-items: center;
+    align-content: center;
+  }
+
+  /* ten digits of 48 px with 10 px gaps need 572 px on the left */
+  .screen--question:not(.screen--email) {
+    grid-template-columns: minmax(572px, 7fr) minmax(0, 5fr);
+  }
+
+  .screen--grow {
+    display: flex;
+    max-width: calc(960px + 96px);
+  }
+
+  .screen__main {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    min-width: 0;
+  }
+
+  .screen--question .screen__main,
+  .screen--email .screen__main {
+    gap: 20px;
+  }
+
+  .screen__aside {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  /* type */
+  .lead {
+    font-size: 18px;
+    max-width: 65ch;
+  }
+
+  .note,
+  .card__desc {
+    font-size: 16px;
+  }
+
+  .heading {
+    font-size: 32px;
+  }
+
+  .section p,
+  .steps,
+  .grow-note {
+    font-size: 17px;
+  }
+
+  /* first screen */
+  .screen--intro .display {
+    font-size: clamp(40px, 4vw, 56px);
+    max-width: 14ch;
+  }
+
+  .screen--intro .intro__head {
+    margin-top: 8px;
+  }
+
+  .screen--intro .teaser:not(.teaser--large) {
+    display: none;
+  }
+
+  .screen--intro .intro__actions {
+    margin-top: 10px;
+    align-items: flex-start;
+  }
+
+  .screen--intro .btn--primary {
+    width: auto;
+    min-width: 240px;
+    padding: 0 40px;
+  }
+
+  .screen--intro .author-line {
+    max-width: 52ch;
+  }
+
+  /* questions 1 to 12 */
+  .question__head {
+    margin-top: 12px;
+  }
+
+  .rates {
+    grid-template-columns: repeat(10, minmax(48px, 1fr));
+  }
+
+  .scale {
+    grid-template-columns: repeat(10, minmax(0, 1fr));
+    column-gap: 10px;
+    row-gap: 0;
+  }
+
+  .scale dt {
+    display: none;
+  }
+
+  .scale dd {
+    grid-row: 1;
+  }
+
+  .scale dd[data-mark="1"] {
+    grid-column: 1 / 4;
+  }
+
+  .scale dd[data-mark="5"] {
+    grid-column: 4 / 7;
+    text-align: center;
+  }
+
+  .scale dd[data-mark="10"] {
+    grid-column: 8 / 11;
+    text-align: right;
+  }
+
+  .mosaic--live {
+    --mosaic-scale: 1.1;
+  }
+
+  /* question 13 */
+  .screen--grow .cards {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .screen--grow .card {
+    flex: 1 1 0;
+  }
+
+  /* email */
+  .email__head {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mosaic-blur--compact {
+    display: none;
+  }
+
+  .mosaic-blur--large {
+    --mosaic-scale: 1.7;
+    display: block;
+    width: min(100%, 420px);
+    filter: blur(24px);
+  }
+
+  .form {
+    max-width: 480px;
+  }
+
+  /* result */
+  .screen--result {
+    display: grid;
+    grid-template-columns: minmax(340px, 440px) minmax(0, 1fr);
+    column-gap: clamp(64px, 7vw, 96px);
+    align-items: start;
+    align-content: start;
+    padding: 48px;
+  }
+
+  .result__left {
+    position: sticky;
+    top: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .result__right {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    max-width: 640px;
+  }
+
+  .result__head,
+  .result__mosaic {
+    padding: 0;
+  }
+
+  .result__body {
+    padding: 0 0 28px;
+  }
+
+  .cta {
+    display: none;
+  }
+
+  .cta-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 28px;
+    border-radius: var(--radius-lg);
+    background: var(--aubergine);
+    color: var(--white);
+  }
+
+  .cta-card .cta__question {
+    font-size: 22px;
+  }
+
+  .cta-card .btn:focus-visible {
+    outline-color: var(--porcelain);
+  }
+
+  .result__footer {
+    padding: 24px 0 0;
+  }
+}
+
+/* Short windows: the left column would not fit, so it scrolls with the page
+   and the call to action comes at the end, as on the phone. */
+@media (min-width: 900px) and (max-height: 759px) {
+  .result__left {
+    position: static;
+  }
+
+  .cta-card {
+    display: none;
+  }
+
+  .cta {
+    display: flex;
+    border-radius: var(--radius-lg);
   }
 }

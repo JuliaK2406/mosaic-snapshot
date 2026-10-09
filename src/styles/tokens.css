@@ -34,4 +34,5 @@
   --radius-lg: 12px;
   --radius-tile: 6px;
   --tile-gap: 6px;
+  --mosaic-scale: 1;      /* multiplies tile sizes of the decorative and blurred mosaics */
 }

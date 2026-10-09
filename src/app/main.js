@@ -3,7 +3,7 @@
 
 import { el, append, svg } from './dom.js';
 import { evaluate, growLineKind, fillTemplate } from './scoring.js';
-import { renderIcon, renderTeaser, renderMosaic, renderLegend } from './mosaic.js';
+import { renderIcon, renderTeaser, renderMosaic, renderLegend, renderLiveMosaic, updateLiveMosaic } from './mosaic.js';
 import { readSrc, calendlyUrl, buildPayload, sendPayload } from './submit.js';
 
 const content = JSON.parse(document.getElementById('snapshot-content').textContent);
@@ -38,6 +38,7 @@ let transition = null;   // timer of the 250 ms highlight before the next screen
 let unwinding = null;    // callback waiting for history.go() to land on the first screen
 let backLock = null;     // ignores a second Back tap until the first one has landed
 let questionRefs = null; // live nodes of the mounted question screen
+let growButtons = null;   // cards of the mounted question 13, for the keyboard
 let submitting = false;  // a result is being prepared; further submits are ignored
 
 // ---------- history ----------
@@ -153,6 +154,27 @@ window.addEventListener('popstate', (event) => {
   render();
 });
 
+// ---------- keyboard, questions 1 to 13 only ----------
+
+window.addEventListener('keydown', (event) => {
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (state.step !== 'q' && state.step !== 'grow') return;
+  const key = event.key;
+  if (key === 'ArrowLeft' || key === 'Backspace') {
+    event.preventDefault();
+    goBack();
+    return;
+  }
+  if (!/^[0-9]$/.test(key)) return;
+  event.preventDefault();
+  if (state.step === 'q') {
+    pick(key === '0' ? 10 : Number(key));
+    return;
+  }
+  const option = content.grow_question.options[Number(key) - 1];
+  if (option && growButtons) pickGrow(option.key, growButtons);
+});
+
 // ---------- rendering ----------
 
 const SCREENS = { intro: introScreen, q: questionScreen, grow: growScreen, email: emailScreen, result: resultScreen };
@@ -163,6 +185,7 @@ function render() {
     updateQuestion();
   } else {
     questionRefs = null;
+    growButtons = null;
     root.replaceChildren(SCREENS[state.step]());
   }
   root.dataset.step = state.step;
@@ -220,7 +243,7 @@ function setProgress(refs, step) {
 
 function introScreen() {
   const screen = el('section', { class: 'screen screen--intro' });
-  append(screen, [
+  const main = el('div', { class: 'screen__main' }, [
     el('div', { class: 'brand' }, [renderIcon(), el('span', { class: 'brand__wordmark', text: content.intro.wordmark })]),
     el('div', { class: 'intro__head' }, [
       el('h1', { class: 'display', tabindex: '-1', 'data-focus-target': '', text: content.intro.headline }),
@@ -236,6 +259,7 @@ function introScreen() {
         : el('button', { type: 'button', class: 'link-button', text: content.intro.sample_label, onclick: showSample }),
     ]),
   ]);
+  append(screen, [main, el('div', { class: 'screen__aside' }, [renderTeaser({ large: true })])]);
   return screen;
 }
 
@@ -278,15 +302,21 @@ function questionScreen() {
   }
   const scale = el('dl', { class: 'scale' });
   for (const mark of content.question.scale) {
-    scale.append(el('dt', { text: String(mark.value) }), el('dd', { text: mark.label }));
+    scale.append(el('dt', { text: String(mark.value) }), el('dd', { text: mark.label, 'data-mark': String(mark.value) }));
   }
+  const live = renderLiveMosaic(content);
+  refs.liveTiles = live.tiles;
+  updateLiveMosaic(live.tiles, state.answers, state.qi, { settle: true });
   append(screen, [
-    refs.bar,
-    refs.progress,
-    el('div', { class: 'question__head' }, [refs.pillar, refs.title, refs.note]),
-    el('p', { class: 'prompt', id: 'question-prompt', text: content.question.prompt }),
-    rates,
-    scale,
+    el('div', { class: 'screen__main' }, [
+      refs.bar,
+      refs.progress,
+      el('div', { class: 'question__head' }, [refs.pillar, refs.title, refs.note]),
+      el('p', { class: 'prompt', id: 'question-prompt', text: content.question.prompt }),
+      rates,
+      scale,
+    ]),
+    el('div', { class: 'screen__aside' }, [live.grid]),
   ]);
   questionRefs = refs;
   updateQuestion();
@@ -307,6 +337,7 @@ function updateQuestion() {
     button.classList.toggle('is-selected', selected);
     button.setAttribute('aria-pressed', selected ? 'true' : 'false');
   });
+  if (refs.liveTiles) updateLiveMosaic(refs.liveTiles, state.answers, state.qi);
 }
 
 function pick(value) {
@@ -323,7 +354,7 @@ function pick(value) {
 // ---------- screen 13: which area to grow ----------
 
 function growScreen() {
-  const screen = el('section', { class: 'screen screen--question' });
+  const screen = el('section', { class: 'screen screen--question screen--grow' });
   const progress = topBar({ step: TOTAL_STEPS, showProgress: true });
   const q = content.grow_question;
   const buttons = [];
@@ -336,15 +367,18 @@ function growScreen() {
     buttons.push({ key: option.key, button });
   }
   markGrow(buttons);
+  growButtons = buttons;
   append(screen, [
-    progress.bar,
-    progress.progress,
-    el('div', { class: 'question__head' }, [
-      el('span', { class: 'eyebrow', text: q.eyebrow }),
-      el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: q.title }),
-      el('p', { class: 'note', text: q.subtitle }),
+    el('div', { class: 'screen__main' }, [
+      progress.bar,
+      progress.progress,
+      el('div', { class: 'question__head' }, [
+        el('span', { class: 'eyebrow', text: q.eyebrow }),
+        el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: q.title }),
+        el('p', { class: 'note', text: q.subtitle }),
+      ]),
+      el('div', { class: 'cards' }, buttons.map((entry) => entry.button)),
     ]),
-    el('div', { class: 'cards' }, buttons.map((entry) => entry.button)),
   ]);
   return screen;
 }
@@ -370,7 +404,7 @@ function pickGrow(key, buttons) {
 // ---------- screen 14: name and email ----------
 
 function emailScreen() {
-  const screen = el('section', { class: 'screen screen--question' });
+  const screen = el('section', { class: 'screen screen--question screen--email' });
   const t = content.email_step;
   const nameError = el('p', { class: 'field__error', id: 'name-error', 'aria-live': 'polite' });
   const emailError = el('p', { class: 'field__error', id: 'email-error', 'aria-live': 'polite' });
@@ -415,15 +449,30 @@ function emailScreen() {
     submitForm({ nameInput, emailInput, nameError, emailError });
   });
   append(screen, [
-    topBar({ step: TOTAL_STEPS, showProgress: false }).bar,
-    el('div', { class: 'question__head question__head--email' }, [
-      el('span', { class: 'eyebrow', text: t.eyebrow }),
-      el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: t.title }),
-      el('p', { class: 'note', text: t.subtitle }),
+    el('div', { class: 'screen__main' }, [
+      topBar({ step: TOTAL_STEPS, showProgress: false }).bar,
+      el('div', { class: 'email__head' }, [
+        el('div', { class: 'email__text' }, [
+          el('span', { class: 'eyebrow', text: t.eyebrow }),
+          el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: t.title }),
+        ]),
+        blurredMosaic('compact'),
+        el('p', { class: 'note', text: t.subtitle }),
+      ]),
+      form,
     ]),
-    form,
+    el('div', { class: 'screen__aside' }, [blurredMosaic('large')]),
   ]);
   return screen;
+}
+
+// The person's real mosaic, blurred: the promise before the email, the reveal after it.
+function blurredMosaic(variant) {
+  if (!state.answers.every(Number.isInteger)) return null;
+  const evaluation = evaluate(state.answers, content);
+  return el('div', { class: `mosaic-blur mosaic-blur--${variant}`, 'aria-hidden': 'true' }, [
+    renderMosaic(content, evaluation, { plain: true }),
+  ]);
 }
 
 function setError(input, errorNode, message) {
@@ -510,7 +559,7 @@ function resultScreen() {
   else body.append(section(r.section_labels.how_it_affects, texts.how_it_affects));
   body.append(section(r.section_labels.first_steps, [], el('ol', { class: 'steps' }, texts.steps.map((step) => el('li', { text: step })))));
 
-  const cta = el('div', { class: 'cta' }, [
+  const ctaBlock = (className) => el('div', { class: className }, [
     el('h2', { class: 'cta__question', text: texts.cta_question }),
     el('a', {
       class: 'btn btn--primary',
@@ -521,6 +570,8 @@ function resultScreen() {
     }),
     el('p', { class: 'cta__note', text: r.cta_note }),
   ]);
+  const cta = ctaBlock('cta');          // the band at the end, phones and short windows
+  const ctaCard = ctaBlock('cta-card'); // the card in the sticky left column, wide screens
 
   const footer = el('div', { class: 'result__footer' }, [
     state.email ? el('p', { class: 'copy-line', text: fillTemplate(r.copy_line, { email: state.email }) }) : null,
@@ -533,14 +584,15 @@ function resultScreen() {
   ]);
 
   append(screen, [
-    el('div', { class: 'result__head' }, [
-      el('span', { class: 'eyebrow', text: r.eyebrow }),
-      el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: greeting }),
+    el('div', { class: 'result__left' }, [
+      el('div', { class: 'result__head' }, [
+        el('span', { class: 'eyebrow', text: r.eyebrow }),
+        el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: greeting }),
+      ]),
+      el('div', { class: 'result__mosaic' }, [renderMosaic(content, evaluation), renderLegend(content)]),
+      ctaCard,
     ]),
-    el('div', { class: 'result__mosaic' }, [renderMosaic(content, evaluation), renderLegend(content)]),
-    body,
-    cta,
-    footer,
+    el('div', { class: 'result__right' }, [body, cta, footer]),
   ]);
   return screen;
 }
