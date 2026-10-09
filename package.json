@@ -13,7 +13,9 @@
     "test": "node --test",
     "serve": "node scripts/serve.mjs",
     "shots": "node scripts/shots.mjs",
-    "verify": "node scripts/verify.mjs"
+    "verify": "node scripts/verify.mjs",
+    "shots:wide": "node scripts/shots-wide.mjs",
+    "compare": "node scripts/compare-shots.mjs"
   },
   "dependencies": {
     "js-yaml": "^5.4.1"

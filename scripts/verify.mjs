@@ -426,6 +426,7 @@ try {
     const { page, context } = await open();
     const targets = async (label) => {
       const small = await page.evaluate(() => [...document.querySelectorAll('button, a, input:not([type="checkbox"]), label.consent')]
+        .filter((n) => n.getClientRects().length > 0)
         .map((n) => [n.className || n.tagName, Math.round(n.getBoundingClientRect().height)])
         .filter(([, h]) => h < 44));
       check(`${label}: every tap target is at least 44 px tall`, small.length === 0, JSON.stringify(small));
@@ -461,10 +462,187 @@ try {
     await dpage.goto(`${url}/`, { waitUntil: 'networkidle' });
     const box = await dpage.evaluate(() => {
       const r = document.querySelector('.screen').getBoundingClientRect();
-      return { width: Math.round(r.width), left: Math.round(r.left), height: Math.round(r.height) };
+      return { width: Math.round(r.width), left: Math.round(r.left), height: Math.round(r.height), inner: window.innerWidth };
     });
-    check('desktop: column is 440 px wide, centred and at least the window height', box.width === 440 && box.left === 500 && box.height >= 900, JSON.stringify(box));
+    check('desktop: wide layout up to 1216 px, centred and at least the window height', box.width <= 1216 && box.width >= 900 && Math.abs(box.left - (box.inner - box.width) / 2) <= 1 && box.height >= 900, JSON.stringify(box));
     await desktop.close();
+  });
+  // ---------- wide mode (laptops) ----------
+  for (const [width, height] of [[1024, 768], [1280, 720], [1440, 900]]) {
+    await section(`wide ${width}x${height}`, async () => {
+      const { page, context } = await open({ viewport: { width, height } });
+      const overflowAt = async (label) => {
+        const [sw, cw] = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
+        check(`${width}x${height} ${label}: no horizontal scroll`, sw === cw, `${sw} vs ${cw}`);
+      };
+      await page.waitForTimeout(1800);
+      const intro = await page.evaluate(() => ({
+        aside: getComputedStyle(document.querySelector('.screen__aside')).display,
+        big: document.querySelectorAll('.teaser--large .teaser__tile').length,
+        bigOpacity: getComputedStyle(document.querySelector('.teaser--large .teaser__tile')).opacity,
+        startWidth: Math.round(document.querySelector('.btn--primary').getBoundingClientRect().width),
+        cols: getComputedStyle(document.querySelector('.screen--intro')).gridTemplateColumns.split(' ').length,
+        headline: Math.round(parseFloat(getComputedStyle(document.querySelector('.display')).fontSize)),
+      }));
+      check(`${width}: first screen in two columns, large mosaic assembled, Start not full width, headline 40 to 56 px`,
+        intro.aside !== 'none' && intro.big === 12 && intro.bigOpacity === '1' && intro.startWidth >= 240 && intro.startWidth < 500 && intro.cols === 2 && intro.headline >= 40 && intro.headline <= 56, JSON.stringify(intro));
+      await overflowAt('first screen');
+      await start(page);
+      const rates = await page.evaluate(() => {
+        const r = [...document.querySelectorAll('.rate')].map((b) => b.getBoundingClientRect());
+        return { rows: new Set(r.map((b) => Math.round(b.top))).size, minWidth: Math.min(...r.map((b) => b.width)) };
+      });
+      check(`${width}: digits 1 to 10 in one row, each at least 48 px wide`, rates.rows === 1 && rates.minWidth >= 48, JSON.stringify(rates));
+      const legend = await page.evaluate(() => {
+        const dds = [...document.querySelectorAll('.scale dd')];
+        const rateLeft = (n) => document.querySelectorAll('.rate')[n - 1].getBoundingClientRect();
+        const r1 = rateLeft(1); const r5 = rateLeft(5); const r10 = rateLeft(10);
+        const b = dds.map((d) => d.getBoundingClientRect());
+        return { rows: new Set(b.map((x) => Math.round(x.top))).size, firstUnder1: Math.abs(b[0].left - r1.left) < 2, midUnder5: Math.abs((b[1].left + b[1].right) / 2 - (r5.left + r5.right) / 2) < 30, lastUnder10: Math.abs(b[2].right - r10.right) < 2 };
+      });
+      check(`${width}: scale labels on one row, under the digits 1, 5 and 10`, legend.rows === 1 && legend.firstUnder1 && legend.midUnder5 && legend.lastUnder10, JSON.stringify(legend));
+      await overflowAt('question 1');
+      await answer(page, [5, 6, 7, 4, 8, 3]);
+      const live = await page.evaluate(() => {
+        const grid = document.querySelector('.mosaic--live');
+        const tiles = [...grid.querySelectorAll('.mosaic__tile')];
+        const filled = tiles.filter((t) => t.classList.contains('is-answered'));
+        const empty = tiles.filter((t) => !t.classList.contains('is-answered'));
+        const current = tiles.findIndex((t) => t.classList.contains('is-current'));
+        const cs = current >= 0 ? getComputedStyle(tiles[current]) : null;
+        return {
+          total: tiles.length,
+          filled: filled.length,
+          shades: [...new Set(filled.map((t) => getComputedStyle(t).backgroundColor))],
+          emptyAll: empty.every((t) => getComputedStyle(t).backgroundColor === 'rgba(0, 0, 0, 0)'),
+          current,
+          currentBorder: cs ? `${cs.borderTopColor} ${cs.borderTopWidth}` : null,
+          hidden: grid.getAttribute('aria-hidden'),
+          visible: getComputedStyle(grid).display !== 'none',
+        };
+      });
+      check(`${width}: live mosaic: 6 filled tiles of one flat shade, the 7th outlined navy, the rest empty, aria-hidden`,
+        live.total === 12 && live.filled === 6 && live.shades.length === 1 && live.shades[0] === 'rgba(94, 26, 77, 0.35)' && live.emptyAll && live.current === 6 && live.currentBorder === 'rgb(30, 42, 71) 2px' && live.hidden === 'true' && live.visible, JSON.stringify(live));
+      await overflowAt('question 7');
+      await page.keyboard.press('ArrowLeft');
+      await waitStep(page, 'q', 5);
+      const kept = await page.evaluate(() => [...document.querySelectorAll('.rate')].findIndex((b) => b.classList.contains('is-selected')) + 1);
+      check(`${width}: Left arrow goes back and the previous answer (3) is selected`, kept === 3, String(kept));
+      await page.keyboard.press('9');
+      await waitStep(page, 'q', 6);
+      await page.keyboard.press('0');
+      await waitStep(page, 'q', 7);
+      await page.keyboard.press('Backspace');
+      await waitStep(page, 'q', 6);
+      const ten = await page.evaluate(() => [...document.querySelectorAll('.rate')].findIndex((b) => b.classList.contains('is-selected')) + 1);
+      const liveCount = await page.evaluate(() => document.querySelectorAll('.mosaic--live .is-answered').length);
+      check(`${width}: keys 9 and 0 set 9 and 10, Backspace goes back, live mosaic counts 7 answers`, ten === 10 && liveCount === 7, `${ten} ${liveCount}`);
+      await answer(page, [5, 5, 5, 5, 5, 5], 6);
+      await waitStep(page, 'grow');
+      const cards = await page.evaluate(() => {
+        const r = [...document.querySelectorAll('.card')].map((c) => c.getBoundingClientRect());
+        return { rows: new Set(r.map((b) => Math.round(b.top))).size, heights: new Set(r.map((b) => Math.round(b.height))).size, noLive: document.querySelector('.mosaic--live') === null };
+      });
+      check(`${width}: question 13 shows three cards in one row of equal height and no live mosaic`, cards.rows === 1 && cards.heights === 1 && cards.noLive, JSON.stringify(cards));
+      await overflowAt('question 13');
+      await page.keyboard.press('2');
+      await waitStep(page, 'email');
+      check(`${width}: key 2 on question 13 chooses a card and opens the email screen`, true);
+      const expectedAnswers = [5, 6, 7, 4, 8, 9, 5, 5, 5, 5, 5, 5];
+      const blur = await page.evaluate(() => {
+        const big = document.querySelector('.mosaic-blur--large');
+        const small = document.querySelector('.mosaic-blur--compact');
+        return {
+          bigDisplay: getComputedStyle(big).display,
+          smallDisplay: getComputedStyle(small).display,
+          filter: getComputedStyle(big).filter,
+          hidden: big.getAttribute('aria-hidden'),
+          tiles: [...big.querySelectorAll('.mosaic__tile')].map((t) => getComputedStyle(t).backgroundColor),
+          scores: document.querySelectorAll('.mosaic-blur .mosaic__score, .mosaic-blur .mosaic__flag').length,
+          width: Math.round(big.getBoundingClientRect().width),
+        };
+      });
+      const shadesOk = blur.tiles.length === 12 && blur.tiles.every((bg, i) => {
+        const m = bg.match(/rgba?\(94, 26, 77(?:, ([\d.]+))?\)/);
+        if (!m) return false;
+        const a = m[1] === undefined ? 1 : Number(m[1]);
+        return Math.abs(a - (0.12 + (0.88 * (expectedAnswers[i] - 1)) / 9)) < 0.01;
+      });
+      check(`${width}: email screen shows the large blurred mosaic with the real shades, aria-hidden, no scores or labels`,
+        blur.bigDisplay !== 'none' && blur.smallDisplay === 'none' && /blur\(/.test(blur.filter) && blur.hidden === 'true' && shadesOk && blur.scores === 0 && blur.width >= 300, JSON.stringify(blur).slice(0, 300));
+      await page.getByLabel(labels.name, { exact: true }).click();
+      await page.keyboard.type('123');
+      await page.keyboard.press('Backspace');
+      const typed = await page.evaluate(() => ({ value: document.getElementById('name').value, step: document.getElementById('app').dataset.step }));
+      check(`${width}: digits and Backspace in the name field edit the text, nothing is intercepted`, typed.value === '12' && typed.step === 'email', JSON.stringify(typed));
+      await overflowAt('email');
+      await fillEmail(page, PERSON);
+      await submit(page);
+      await waitStep(page, 'result');
+      await page.waitForTimeout(RESULT_SETTLE_MS);
+      await overflowAt('result');
+      const layout = await page.evaluate(() => {
+        const left = document.querySelector('.result__left');
+        return {
+          position: getComputedStyle(left).position,
+          card: getComputedStyle(document.querySelector('.cta-card')).display,
+          band: getComputedStyle(document.querySelector('.cta')).display,
+          cols: getComputedStyle(document.querySelector('.screen--result')).gridTemplateColumns.split(' ').length,
+        };
+      });
+      if (height >= 760) {
+        check(`${width}x${height}: result in two columns, left column sticky with the call card, no band at the end`, layout.cols === 2 && layout.position === 'sticky' && layout.card !== 'none' && layout.band === 'none', JSON.stringify(layout));
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        await page.waitForTimeout(200);
+        const stuck = await page.evaluate(() => {
+          const r = document.querySelector('.result__left').getBoundingClientRect();
+          return { top: Math.round(r.top), bottom: Math.round(r.bottom), inner: window.innerHeight, scrolled: window.scrollY > 0 };
+        });
+        // At the very end of the page the sticky column may be pushed up by the end of its grid row;
+        // it must stay fully visible, and on tall windows it stays exactly 32 px from the top.
+        const stickyOk = height >= 900 ? stuck.top === 32 : stuck.top >= 0;
+        check(`${width}x${height}: after scrolling to the end the left column is still fully visible${height >= 900 ? ' at 32 px from the top' : ''}`, stuck.scrolled && stickyOk && stuck.bottom <= stuck.inner, JSON.stringify(stuck));
+      } else {
+        check(`${width}x${height}: short window: left column scrolls with the page, call band at the end`, layout.position === 'static' && layout.card === 'none' && layout.band !== 'none', JSON.stringify(layout));
+        await page.evaluate(() => document.querySelector('.cta a').scrollIntoView({ block: 'center' }));
+        await page.waitForTimeout(200);
+        const reach = await page.evaluate(() => {
+          const r = document.querySelector('.cta a').getBoundingClientRect();
+          return { top: Math.round(r.top), bottom: Math.round(r.bottom), inner: window.innerHeight, visible: r.width > 0 && r.height > 0 };
+        });
+        check(`${width}x${height}: the call button can be scrolled into view`, reach.visible && reach.top >= 0 && reach.bottom <= reach.inner, JSON.stringify(reach));
+      }
+      await context.close();
+    });
+  }
+
+  // ---------- tablet portrait keeps the phone design ----------
+  await section('tablet', async () => {
+    const { page, context } = await open({ viewport: { width: 834, height: 1194 }, isMobile: true, hasTouch: true });
+    const t = await page.evaluate(() => ({ aside: getComputedStyle(document.querySelector('.screen__aside')).display, display: getComputedStyle(document.querySelector('.screen--intro')).display }));
+    check('834 px: phone design, no aside, single column', t.aside === 'none' && t.display === 'flex', JSON.stringify(t));
+    await start(page);
+    const cols = await page.evaluate(() => getComputedStyle(document.querySelector('.rates')).gridTemplateColumns.split(' ').length);
+    check('834 px: digits in the 5 x 2 grid', cols === 5, String(cols));
+    await context.close();
+  });
+
+  // ---------- short phone: the email screen with the compact blurred mosaic ----------
+  await section('short phone', async () => {
+    const { page, context } = await open({ viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true });
+    await start(page);
+    await answer(page, new Array(12).fill(6));
+    await grow(page, 'P');
+    const m = await page.evaluate(() => {
+      const small = document.querySelector('.mosaic-blur--compact');
+      const r = small.getBoundingClientRect();
+      const button = document.querySelector('.btn--primary').getBoundingClientRect();
+      const title = document.querySelector('h1').getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height), filter: getComputedStyle(small).filter, hidden: small.getAttribute('aria-hidden'), rightOfTitle: r.left >= title.right, buttonBottom: Math.round(button.bottom), inner: window.innerHeight, scrollY: window.scrollY, scores: small.querySelectorAll('.mosaic__score, .mosaic__flag').length };
+    });
+    check('390 x 664: compact blurred mosaic about 96 px beside the title, aria-hidden, no scores', m.w >= 90 && m.w <= 102 && m.h >= 90 && m.h <= 104 && /blur\(/.test(m.filter) && m.hidden === 'true' && m.rightOfTitle && m.scores === 0, JSON.stringify(m));
+    check('390 x 664: the submit button is visible without scrolling', m.scrollY === 0 && m.buttonBottom <= m.inner, JSON.stringify(m));
+    await context.close();
   });
 } finally {
   await browser.close();

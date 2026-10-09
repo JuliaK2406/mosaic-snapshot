@@ -9,7 +9,7 @@ import { chromium } from 'playwright';
 import { ROOT, loadContent } from '../src/check.mjs';
 import { startServer } from './serve.mjs';
 
-const DEFAULT_OUT_DIR = path.resolve(ROOT, '..', 'screenshots 01 - каркас');
+const DEFAULT_OUT_DIR = process.env.SHOTS_DIR || path.resolve(ROOT, '..', 'screenshots 01 - каркас');
 export const RESULT_SETTLE_MS = 2500;
 export const VIEWPORTS = [
   { name: '390', width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
