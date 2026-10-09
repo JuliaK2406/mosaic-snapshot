@@ -157,8 +157,9 @@ window.addEventListener('popstate', (event) => {
 // ---------- keyboard, questions 1 to 13 only ----------
 
 window.addEventListener('keydown', (event) => {
-  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
   if (state.step !== 'q' && state.step !== 'grow') return;
+  if (event.target && event.target.closest && event.target.closest('input, textarea, select, [contenteditable]')) return;
   const key = event.key;
   if (key === 'ArrowLeft' || key === 'Backspace') {
     event.preventDefault();
@@ -187,6 +188,7 @@ function render() {
     questionRefs = null;
     growButtons = null;
     root.replaceChildren(SCREENS[state.step]());
+    if (state.step === 'result') fitResultColumn();
   }
   root.dataset.step = state.step;
   root.dataset.qi = state.step === 'q' ? String(state.qi) : '';
@@ -614,6 +616,26 @@ function retake() {
     showIntro();
   }
 }
+
+// On wide screens the left column of the result is sticky. When it is taller than the
+// window (long greeting, small window) it would hide the call button, so the page falls
+// back to the short-window layout: static column, call band at the end.
+function fitResultColumn() {
+  const screen = root.querySelector('.screen--result');
+  if (!screen) return;
+  const left = screen.querySelector('.result__left');
+  screen.classList.remove('result--tall');
+  const needed = left.getBoundingClientRect().height + 32 + 16;
+  screen.classList.toggle('result--tall', needed > window.innerHeight);
+}
+
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (state.step === 'result') fitResultColumn();
+  }, 100);
+});
 
 // ---------- start ----------
 

@@ -468,7 +468,7 @@ try {
     await desktop.close();
   });
   // ---------- wide mode (laptops) ----------
-  for (const [width, height] of [[1024, 768], [1280, 720], [1440, 900]]) {
+  for (const [width, height] of [[1024, 768], [1280, 720], [1366, 768], [1440, 900]]) {
     await section(`wide ${width}x${height}`, async () => {
       const { page, context } = await open({ viewport: { width, height } });
       const overflowAt = async (label) => {
@@ -615,6 +615,128 @@ try {
       await context.close();
     });
   }
+
+  // ---------- review follow-ups: reduced motion on wide screens, key repeat, narrow laptops, blur, line length, tall column ----------
+  await section('wide reduced motion', async () => {
+    const { page, context } = await open({ viewport: { width: 1440, height: 900 } }, '/', (p) => p.emulateMedia({ reducedMotion: 'reduce' }));
+    const teaser = await page.evaluate(() => {
+      const tiles = [...document.querySelectorAll('.teaser--large .teaser__tile')];
+      return { names: [...new Set(tiles.map((t) => getComputedStyle(t).animationName))], opacity: [...new Set(tiles.map((t) => getComputedStyle(t).opacity))] };
+    });
+    check('1440 reduced motion: the large first-screen mosaic shows at once, no animation', teaser.names.join() === 'none' && teaser.opacity.join() === '1', JSON.stringify(teaser));
+    await start(page);
+    await page.keyboard.press('5');
+    const live = await page.evaluate(() => {
+      const tile = document.querySelector('.mosaic--live .is-answered');
+      return tile ? { name: getComputedStyle(tile).animationName, opacity: getComputedStyle(tile).opacity } : null;
+    });
+    check('1440 reduced motion: an answered live tile fills without animation', live && live.name === 'none' && live.opacity === '1', JSON.stringify(live));
+    await context.close();
+  });
+
+  await section('key repeat', async () => {
+    const { page, context } = await open({ viewport: { width: 1440, height: 900 } });
+    await start(page);
+    await page.evaluate(() => {
+      for (let i = 0; i < 6; i += 1) window.dispatchEvent(new KeyboardEvent('keydown', { key: '5', repeat: true, bubbles: true }));
+    });
+    await page.waitForTimeout(400);
+    const after = await page.evaluate(() => ({ qi: document.getElementById('app').dataset.qi, answered: document.querySelectorAll('.mosaic--live .is-answered').length }));
+    check('holding a digit key down (auto-repeat) answers nothing', after.qi === '0' && after.answered === 0, JSON.stringify(after));
+    await page.keyboard.press('5');
+    await waitStep(page, 'q', 1);
+    check('a normal key press still answers', true);
+    await context.close();
+  });
+
+  for (const width of [900, 960]) {
+    await section(`narrow laptop ${width}`, async () => {
+      const { page, context } = await open({ viewport: { width, height: 800 } });
+      await start(page);
+      await answer(page, [5, 6, 7, 4, 8, 3]);
+      const m = await page.evaluate(() => {
+        const names = [...document.querySelectorAll('.mosaic--live .mosaic__name')];
+        const rates = [...document.querySelectorAll('.rate')].map((b) => b.getBoundingClientRect());
+        return {
+          labels: names.map((n) => ({ text: n.textContent, oneLine: n.getBoundingClientRect().height < 20, fits: n.scrollWidth <= n.clientWidth })),
+          rows: new Set(rates.map((r) => Math.round(r.top))).size,
+          minWidth: Math.min(...rates.map((r) => r.width)),
+          sw: document.documentElement.scrollWidth,
+          cw: document.documentElement.clientWidth,
+        };
+      });
+      check(`${width}: live mosaic labels stay on one line and are not cut, digits in one row at 44 px or more, no overflow`,
+        m.labels.length === 3 && m.labels.every((l) => l.oneLine && l.fits) && m.rows === 1 && m.minWidth >= 44 && m.sw === m.cw, JSON.stringify(m));
+      await context.close();
+    });
+  }
+
+  await section('blur strength and line length', async () => {
+    const { page, context } = await open({ viewport: { width: 1440, height: 900 } });
+    await start(page);
+    await answer(page, [1, 10, 1, 10, 10, 1, 10, 1, 1, 10, 1, 10]);
+    await grow(page, 'F');
+    const blur = await page.evaluate(() => {
+      const big = document.querySelector('.mosaic-blur--large');
+      const tile = big.querySelector('.mosaic__tile');
+      const radius = parseFloat((getComputedStyle(big).filter.match(/blur\(([\d.]+)px\)/) || [])[1]);
+      return { radius, tileWidth: tile.getBoundingClientRect().width };
+    });
+    check('1440: blur radius is at least 0.45 of the tile width, so single tiles cannot be read', blur.radius >= 0.45 * blur.tileWidth, JSON.stringify(blur));
+    const lead = await page.evaluate(() => {
+      const l = document.querySelector('.lead');
+      return l ? { width: l.getBoundingClientRect().width, size: parseFloat(getComputedStyle(l).fontSize) } : null;
+    });
+    await fillEmail(page, PERSON);
+    await submit(page);
+    await waitStep(page, 'result');
+    await page.waitForTimeout(RESULT_SETTLE_MS);
+    const text = await page.evaluate(() => {
+      const p = document.querySelector('.section p');
+      const right = document.querySelector('.result__right');
+      return { pWidth: p.getBoundingClientRect().width, size: parseFloat(getComputedStyle(p).fontSize), rightWidth: right.getBoundingClientRect().width };
+    });
+    // Inter averages about half an em per character in running English text.
+    const charsPerLine = text.pWidth / (text.size * 0.5);
+    check('1440: result paragraphs hold about 65 characters per line or fewer', text.rightWidth <= 540 && charsPerLine <= 66, JSON.stringify({ ...text, charsPerLine: Math.round(charsPerLine) }));
+    await context.close();
+    const intro = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ipage = await intro.newPage();
+    await ipage.goto(`${url}/`, { waitUntil: 'networkidle' });
+    const leadNow = await ipage.evaluate(() => {
+      const l = document.querySelector('.lead');
+      return { width: l.getBoundingClientRect().width, size: parseFloat(getComputedStyle(l).fontSize) };
+    });
+    check('1440: the first-screen lead holds about 65 characters per line or fewer', leadNow.width / (leadNow.size * 0.5) <= 66, JSON.stringify(leadNow));
+    await intro.close();
+  });
+
+  await section('tall result column', async () => {
+    const { page, context } = await open({ viewport: { width: 1366, height: 768 } });
+    await complete(page, { answers: [8, 8, 8, 8, 8, 8, 8, 8, 2, 3, 2, 3], grow: 'V', name: 'Anna-Maria Konstantinopolskaya-Longname', email: PERSON.email });
+    await page.waitForTimeout(RESULT_SETTLE_MS);
+    const tall = await page.evaluate(() => ({
+      tallClass: document.querySelector('.screen--result').classList.contains('result--tall'),
+      position: getComputedStyle(document.querySelector('.result__left')).position,
+      band: getComputedStyle(document.querySelector('.cta')).display,
+      card: getComputedStyle(document.querySelector('.cta-card')).display,
+    }));
+    check('1366x768 with a long name: the left column does not fit, so it scrolls and the call band returns', tall.tallClass && tall.position === 'static' && tall.band !== 'none' && tall.card === 'none', JSON.stringify(tall));
+    await page.evaluate(() => document.querySelector('.cta a').scrollIntoView({ block: 'center' }));
+    const reach = await page.evaluate(() => {
+      const r = document.querySelector('.cta a').getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= window.innerHeight;
+    });
+    check('1366x768 with a long name: the call button can be scrolled into view', reach);
+    await context.close();
+    const short = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+    const spage = await short.newPage();
+    await spage.goto(`${url}/`, { waitUntil: 'networkidle' });
+    await complete(spage, { answers: [8, 8, 8, 8, 8, 8, 8, 8, 2, 3, 2, 3], grow: 'V', ...PERSON });
+    const fits = await spage.evaluate(() => ({ tallClass: document.querySelector('.screen--result').classList.contains('result--tall'), position: getComputedStyle(document.querySelector('.result__left')).position }));
+    check('1366x768 with a short name: the left column fits and stays sticky', !fits.tallClass && fits.position === 'sticky', JSON.stringify(fits));
+    await short.close();
+  });
 
   // ---------- tablet portrait keeps the phone design ----------
   await section('tablet', async () => {

@@ -23,7 +23,15 @@ const CASES = {
 const WIDE_VIEWPORTS = [
   { name: '1024x768', width: 1024, height: 768 },
   { name: '1280x720', width: 1280, height: 720 },
+  { name: '1366x768', width: 1366, height: 768 },
   { name: '1440x900', width: 1440, height: 900 },
+];
+
+// The narrow end of the wide mode, where the live mosaic has the least room.
+const NARROW = { name: '960x800', width: 960, height: 800 };
+const NARROW_SCENARIOS = [
+  { id: '03-q07-live', run: async (page) => { await start(page); await answer(page, [5, 6, 7, 4, 8, 3]); } },
+  { id: '05-email', run: async (page) => { await start(page); await answer(page, ALL_EIGHT); await grow(page, 'P'); } },
 ];
 
 const WIDE_SCENARIOS = [
@@ -89,6 +97,7 @@ export async function takeWideShots(outDir = OUT_DIR) {
   const browser = await chromium.launch();
   try {
     for (const viewport of WIDE_VIEWPORTS) problems.push(...await shoot(browser, url, viewport, WIDE_SCENARIOS, outDir));
+    problems.push(...await shoot(browser, url, NARROW, NARROW_SCENARIOS, outDir));
     problems.push(...await shoot(browser, url, TABLET, TABLET_SCENARIOS, outDir));
     problems.push(...await shoot(browser, url, SHORT_PHONE, SHORT_PHONE_SCENARIOS, outDir));
   } finally {

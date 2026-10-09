@@ -293,10 +293,6 @@ a {
   margin-top: 28px;
 }
 
-.question__head--email {
-  margin-top: 16px;
-}
-
 .prompt {
   margin-top: 12px;
   font-size: 14px;
@@ -751,10 +747,11 @@ a {
   grid-column: 1 / -1;
 }
 
+/* Blur radius about half a tile width: tiles melt into their column, columns stay visible. */
 .mosaic-blur {
   --mosaic-scale: 0.42;
   width: 96px;
-  filter: blur(4.5px);
+  filter: blur(12px);
   pointer-events: none;
 }
 
@@ -762,6 +759,8 @@ a {
   display: none;
 }
 
+/* Twice the usual column gap: under a strong blur the rows of tiles melt together
+   while the three columns remain as soft bands. */
 .mosaic--plain {
   gap: calc(16px * var(--mosaic-scale));
 }
@@ -792,6 +791,12 @@ a {
   gap: 8px;
   padding: 0;
   border: 0;
+}
+
+.mosaic--live .mosaic__name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mosaic--live .mosaic__tiles {
@@ -903,7 +908,7 @@ a {
   /* type */
   .lead {
     font-size: 18px;
-    max-width: 65ch;
+    max-width: 576px; /* about 64 characters of Inter at 18 px */
   }
 
   .note,
@@ -947,7 +952,7 @@ a {
   }
 
   .screen--intro .author-line {
-    max-width: 52ch;
+    max-width: 48ch;
   }
 
   /* questions 1 to 12 */
@@ -966,7 +971,12 @@ a {
   }
 
   .scale dt {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .scale dd {
@@ -1014,11 +1024,15 @@ a {
     --mosaic-scale: 1.7;
     display: block;
     width: min(100%, 420px);
-    filter: blur(24px);
+    filter: blur(64px);
   }
 
   .form {
-    max-width: 480px;
+    max-width: 440px;
+  }
+
+  .data-note {
+    max-width: 56ch;
   }
 
   /* result */
@@ -1043,7 +1057,7 @@ a {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    max-width: 640px;
+    max-width: 540px;
   }
 
   .result__head,
@@ -1079,6 +1093,55 @@ a {
 
   .result__footer {
     padding: 24px 0 0;
+  }
+
+  /* The left column does not fit the window (long greeting, small window):
+     main.js adds result--tall, and the page behaves like a short window. */
+  .screen--result.result--tall .result__left {
+    position: static;
+  }
+
+  .screen--result.result--tall .cta-card {
+    display: none;
+  }
+
+  .screen--result.result--tall .cta {
+    display: flex;
+    border-radius: var(--radius-lg);
+  }
+}
+
+/* Narrow laptops, 900 to 1023 px: smaller digits and gaps so the live mosaic keeps room
+   for its labels (ten digits of 44 px with 8 px gaps need 512 px). */
+@media (min-width: 900px) and (max-width: 1023px) {
+  .screen--question:not(.screen--email) {
+    grid-template-columns: minmax(512px, 7fr) minmax(0, 5fr);
+    column-gap: 48px;
+  }
+
+  .rates {
+    grid-template-columns: repeat(10, minmax(44px, 1fr));
+    gap: 8px;
+  }
+
+  .scale {
+    column-gap: 8px;
+  }
+
+  .mosaic--live .mosaic__name {
+    font-size: 11px;
+  }
+}
+
+/* Reduced motion, repeated at the end of the file so that it also wins over the
+   stage 2 animations above (same selectors, later in the cascade). */
+@media (prefers-reduced-motion: reduce) {
+  .mosaic__tile,
+  .teaser__tile,
+  .teaser--large .teaser__tile,
+  .mosaic--live .mosaic__tile.is-answered,
+  .rise {
+    animation: none;
   }
 }
 
