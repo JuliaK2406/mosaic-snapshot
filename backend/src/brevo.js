@@ -66,6 +66,13 @@ export function errorNote(code, text) {
   return `Brevo ${code}: ${body.slice(0, 200)}`;
 }
 
+// Brevo reports the state of transactional sending as relay.enabled in GET /v3/account.
+// true or false when the field is there, null when it is not.
+export function relayEnabled(json) {
+  if (!json || typeof json !== 'object' || !json.relay || typeof json.relay !== 'object') return null;
+  return json.relay.enabled === true;
+}
+
 // One line about GET /v3/account for checkSetup.
 export function describeAccount(json) {
   if (!json || typeof json !== 'object') return 'account: no readable answer';
@@ -73,11 +80,11 @@ export function describeAccount(json) {
   const planText = plans.length
     ? plans.map((plan) => `${plan.type || '?'}${plan.credits !== undefined ? ` (${plan.credits} ${plan.creditsType || 'credits'})` : ''}`).join(', ')
     : 'unknown';
-  const flagKeys = Object.keys(json).filter((key) => /transactional|smtp/i.test(key));
-  const flagText = flagKeys.length
-    ? flagKeys.map((key) => `${key}=${JSON.stringify(json[key])}`).join(', ')
-    : 'transactional flag not in the answer (the support ticket decides)';
-  return `account: ${json.email || json.companyName || 'ok'}; plan ${planText}; ${flagText}`;
+  const relay = relayEnabled(json);
+  const relayText = relay === null
+    ? 'transactional sending (relay): not in the answer, the support ticket decides'
+    : `transactional sending (relay): ${relay ? 'enabled' : 'NOT enabled'}`;
+  return `account: ${json.email || json.companyName || 'ok'}; plan ${planText}; ${relayText}`;
 }
 
 export function describeSenders(json) {

@@ -185,8 +185,9 @@ export async function build(options = {}) {
   };
   if (!content.meta.published) files['robots.txt'] = ROBOTS_TXT;
 
-  await rm(distDir, { recursive: true, force: true });
+  // Only the build's own files are replaced; dist/emails (the email previews) stays.
   await mkdir(distDir, { recursive: true });
+  for (const name of [...Object.keys(files), 'robots.txt']) await rm(path.join(distDir, name), { force: true });
   for (const [name, body] of Object.entries(files)) await writeFile(path.join(distDir, name), body, 'utf8');
   for (const name of Object.keys(files)) {
     const { size } = await stat(path.join(distDir, name));

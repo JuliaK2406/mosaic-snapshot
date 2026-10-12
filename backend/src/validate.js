@@ -13,12 +13,24 @@ export const ANSWER_KEYS = ['F1', 'F2', 'F3', 'F4', 'P1', 'P2', 'P3', 'P4', 'V1'
 export const SPAM_PATTERN = /https?:|www\.|:\/\/|@/i;
 export const SUBMITTED_AT_MAX = 40;
 
-// Control characters (0 to 31 and 127), built without escape sequences on purpose.
-const CONTROL_CHARACTERS = new RegExp('[' + String.fromCharCode(0) + '-' + String.fromCharCode(31) + String.fromCharCode(127) + ']', 'g');
+// Control characters (0 to 31 and 127) and invisible ones (zero-width, direction marks,
+// byte order mark), built without escape sequences on purpose.
+const chr = (code) => String.fromCharCode(code);
+const CONTROL_CHARACTERS = new RegExp('[' + chr(0) + '-' + chr(31) + chr(127) + ']', 'g');
+const INVISIBLE_CHARACTERS = new RegExp('[' + chr(0x200B) + '-' + chr(0x200F) + chr(0x2028) + '-' + chr(0x202E) + chr(0x2060) + chr(0xFEFF) + ']', 'g');
+// Google Sheets reads a cell that starts with one of these as a formula or a number.
+export const FORMULA_START = /^[=+\-@]+/;
+export const SUBMITTED_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
 export function cleanName(raw) {
   if (typeof raw !== 'string') return '';
-  return raw.replace(CONTROL_CHARACTERS, '').replace(/\s+/g, ' ').trim();
+  return raw
+    .replace(CONTROL_CHARACTERS, '')
+    .replace(INVISIBLE_CHARACTERS, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(FORMULA_START, '')
+    .trim();
 }
 
 export function looksLikeSpam(name) {
@@ -51,7 +63,7 @@ export function parseSubmission(raw) {
   if (name.length < 1 || name.length > NAME_MAX) errors.push(`name must be 1 to ${NAME_MAX} characters`);
 
   const email = typeof data.email === 'string' ? data.email.trim() : '';
-  if (!EMAIL_PATTERN_SERVER.test(email) || email.length > EMAIL_MAX) errors.push('email is not valid');
+  if (!EMAIL_PATTERN_SERVER.test(email) || email.length > EMAIL_MAX || FORMULA_START.test(email)) errors.push('email is not valid');
 
   if (typeof data.consent !== 'boolean') errors.push('consent must be true or false');
 
@@ -75,7 +87,9 @@ export function parseSubmission(raw) {
 
   if (errors.length) return { ok: false, errors };
 
-  const submittedAt = typeof data.submitted_at === 'string' && data.submitted_at.length <= SUBMITTED_AT_MAX ? data.submitted_at : '';
+  const submittedAt = typeof data.submitted_at === 'string' && data.submitted_at.length <= SUBMITTED_AT_MAX && SUBMITTED_AT_PATTERN.test(data.submitted_at)
+    ? data.submitted_at
+    : '';
   const submission = {
     version: 1,
     name,

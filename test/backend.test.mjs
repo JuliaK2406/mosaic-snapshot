@@ -6,6 +6,8 @@ import { buildBackendCode, CODE_GS } from '../src/build.mjs';
 import { evaluate } from '../src/app/scoring.js';
 import { TILE_HEIGHTS, tileAlpha } from '../src/app/mosaic.js';
 import { parseSubmission, cleanName, looksLikeSpam, ANSWER_KEYS } from '../backend/src/validate.js';
+import { safeCell } from '../backend/src/sheet.js';
+import { relayEnabled, describeAccount } from '../backend/src/brevo.js';
 import { LIMITS, decideSending, counterKeys, staleCounterKeys, dayKey, hourKey } from '../backend/src/limits.js';
 import { HEADERS, buildRecord, rowValues, columnOf, missingHeaders, resultLabel } from '../backend/src/sheet.js';
 import { renderEmail, renderNotification, EMAIL_TILE_HEIGHTS, emailTileAlpha, tileHex, NOTE_BACKGROUND, withParams, escapeHtml } from '../backend/src/email.js';
@@ -211,8 +213,11 @@ test('email: every text of the four results is in the text and the HTML word for
       assert.ok(text.includes(norm(line)), `${key}: grow line in text`);
       assert.ok(html.includes(norm(line)), `${key}: grow line in html`);
     } else {
-      assert.ok(!text.includes('You said you would most like'), 'balanced: no grow line');
-      assert.ok(!html.includes(content.result.focus_label), 'balanced: no focus label');
+      for (const template of [content.result.grow_match, content.result.grow_mismatch]) {
+        const head = norm(template.split('{')[0]);
+        if (head) assert.ok(!text.includes(head) && !html.includes(head), 'balanced: no grow line');
+      }
+      assert.ok(!html.includes(`${escapeHtml(content.result.focus_label)}</td>`), 'balanced: no focus label');
     }
     assert.equal(message.subject, content.email.subject.replace('{name}', 'Anna'));
     assert.ok(message.html.includes(`Hi Anna,`));
@@ -301,7 +306,7 @@ function fakeServices({ config = {}, content: served = content, brevoResponses =
       log: () => {},
       loadContent: () => ({ content: served, error: contentError }),
       withLock: (fn) => fn(),
-      hash: (email) => `h(${email.toLowerCase()})`,
+      hash: (email) => `h(${email})`,
       cache: { get: (key) => (key in cache ? cache[key] : null), put: (key, value) => { cache[key] = value; } },
       counters: { getAll: () => ({ ...counters }), set: (key, value) => { counters[key] = String(value); }, remove: (keys) => keys.forEach((key) => delete counters[key]) },
       sheet: {
@@ -355,10 +360,13 @@ test('path: a second submission from the same address within 2 minutes is rate-l
   const second = fakeServices({ state, now: new Date('2026-10-12T10:01:00Z') });
   const outcome = processSubmission(submission, false, second.services);
   assert.equal(outcome.emailStatus, STATUS.RATE_LIMITED);
-  assert.equal(outcome.contactStatus, STATUS.SKIPPED);
+  assert.equal(outcome.contactStatus, STATUS.ADDED, 'the consent still counts');
   assert.ok(outcome.note.includes('limit'));
-  assert.equal(second.calls.length, 0);
+  assert.equal(second.calls.length, 1);
+  assert.equal(second.calls[0].path, '/contacts');
   assert.equal(state.sheet.rows.length, 2);
+  const upperCase = fakeServices({ state, now: new Date('2026-10-12T10:01:30Z') });
+  assert.equal(processSubmission({ ...submission, email: 'Anna@Example.com' }, false, upperCase.services).emailStatus, STATUS.RATE_LIMITED, 'letter case does not bypass the limit');
   const third = fakeServices({ state, now: new Date('2026-10-12T10:03:00Z') });
   assert.equal(processSubmission(submission, false, third.services).emailStatus, STATUS.SENT);
 });
@@ -442,9 +450,90 @@ test('backend/Code.gs matches a fresh build, has no imports, no secrets and no y
   assert.ok(fresh.startsWith('// generated from backend/src, do not edit here'));
   assert.ok(!/^\s*(import|export)\b/m.test(fresh));
   assert.ok(!/xkeysib|api-key:\s*['"][A-Za-z0-9]/.test(fresh));
-  for (const text of [content.results.F.headline, content.intro.headline, content.email.subject, content.pillars[0].name]) {
+  const leaves = [];
+  const walk = (value) => {
+    if (typeof value === 'string') leaves.push(value);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  };
+  walk(content);
+  for (const text of leaves.filter((leaf) => leaf.length > 12 && !/^https?:/.test(leaf))) {
     assert.ok(!fresh.includes(text), `Code.gs must not contain "${text}"`);
   }
   assert.ok(fresh.includes('function doPost('));
   assert.ok(fresh.includes('function evaluate('));
+});
+
+// ---------- review follow-ups ----------
+
+test('formulas cannot reach the sheet: leading = + - @ leave the name, such emails are invalid, submitted_at must be ISO', () => {
+  const name = parseSubmission(good({ name: '=HYPERLINK("//evil.io","Open")' })).submission.name;
+  assert.equal(name, 'HYPERLINK("//evil.io","Open")');
+  assert.equal(parseSubmission(good({ name: '+-=@Anna' })).submission.name, 'Anna');
+  assert.ok(errorsOf(good({ email: '=IMPORTDATA("x")@a.b' })).some((e) => e.includes('email')));
+  assert.ok(errorsOf(good({ email: '-anna@example.com' })).some((e) => e.includes('email')));
+  assert.equal(parseSubmission(good({ submitted_at: '=HYPERLINK("//e.io")' })).submission.submittedAt, '');
+  assert.equal(parseSubmission(good({ submitted_at: '2026-10-12T10:00:00.000Z' })).submission.submittedAt, '2026-10-12T10:00:00.000Z');
+  assert.equal(parseSubmission(good({ submitted_at: '2026-10-12T10:00:00Z' })).submission.submittedAt, '2026-10-12T10:00:00Z');
+  assert.equal(safeCell('=1+1'), ' =1+1');
+  assert.equal(safeCell('+41 79'), ' +41 79');
+  assert.equal(safeCell('Anna'), 'Anna');
+  assert.equal(safeCell(7.5), 7.5);
+  assert.deepEqual(rowValues(['Note', 'F1'], { Note: '@import', F1: 4 }), [' @import', 4]);
+});
+
+test('invisible and direction characters leave the name', () => {
+  const tricky = 'An' + String.fromCharCode(0x200B) + 'na' + String.fromCharCode(0x202E) + String.fromCharCode(0xFEFF);
+  assert.equal(cleanName(tricky), 'Anna');
+  assert.equal(cleanName('   '), '');
+  assert.ok(errorsOf(good({ name: '=' })).some((e) => e.includes('name')));
+});
+
+test('path: a Brevo transport failure (code 0) ends in failed with the reason, never pending', () => {
+  const fake = fakeServices({ brevoResponses: [{ code: 0, text: 'request failed: DNS error', json: null }, { code: 0, text: 'request failed: timeout', json: null }] });
+  const outcome = processSubmission(submission, false, fake.services);
+  assert.equal(outcome.emailStatus, STATUS.FAILED);
+  assert.equal(outcome.contactStatus, STATUS.FAILED);
+  assert.ok(outcome.note.includes('DNS error'));
+  assert.equal(cellOf(fake, outcome.rowIndex, 'Email status'), 'failed');
+  assert.equal(cellOf(fake, outcome.rowIndex, 'Contact status'), 'failed');
+});
+
+test('path: a service that throws after the row was written still leaves final statuses', () => {
+  const fake = fakeServices();
+  fake.services.brevo = () => { throw new Error('boom'); };
+  const outcome = processSubmission(submission, false, fake.services);
+  assert.equal(outcome.emailStatus, STATUS.FAILED);
+  assert.equal(outcome.contactStatus, STATUS.FAILED);
+  assert.ok(outcome.note.includes('boom'));
+  assert.equal(cellOf(fake, outcome.rowIndex, 'Email status'), 'failed');
+  assert.notEqual(cellOf(fake, outcome.rowIndex, 'Note'), '');
+});
+
+test('path: when the lock does not come, the row is still written without sending', () => {
+  const fake = fakeServices();
+  fake.services.withLock = () => { throw new Error('Lock timeout: another process was holding the lock'); };
+  const outcome = processSubmission(submission, false, fake.services);
+  assert.equal(outcome.emailStatus, STATUS.FAILED);
+  assert.equal(outcome.contactStatus, STATUS.SKIPPED);
+  assert.ok(outcome.note.includes('lock'));
+  assert.equal(fake.sheet.rows.length, 1);
+  assert.equal(fake.calls.length, 0);
+  assert.equal(Object.keys(fake.counters).length, 0);
+});
+
+test('brevo: the transactional flag is read from relay.enabled', () => {
+  assert.equal(relayEnabled({ relay: { enabled: true } }), true);
+  assert.equal(relayEnabled({ relay: { enabled: false } }), false);
+  assert.equal(relayEnabled({ plan: [] }), null);
+  assert.ok(describeAccount({ email: 'j@x.y', plan: [{ type: 'free', credits: 300, creditsType: 'sendLimit' }], relay: { enabled: false } }).includes('NOT enabled'));
+  assert.ok(describeAccount({ plan: [] }).includes('not in the answer'));
+});
+
+test('email: Outlook gets a fixed 600 px table, the preheader is hidden there too, the button padding sits on the cell', () => {
+  const message = renderEmail(content, { name: 'Anna', email: 'a@b.co', src: '', grow: 'V' }, evaluate(CASES.F.answers, content));
+  assert.ok(message.html.includes('<!--[if mso]><table role="presentation" width="600"'));
+  assert.ok(message.html.includes('<!--[if mso]></td></tr></table><![endif]-->'));
+  assert.ok(message.html.includes('mso-hide:all;'));
+  assert.ok(/border-radius:10px;padding:16px 28px;"><a href=/.test(message.html));
 });

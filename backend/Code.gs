@@ -186,12 +186,24 @@ const ANSWER_KEYS = ['F1', 'F2', 'F3', 'F4', 'P1', 'P2', 'P3', 'P4', 'V1', 'V2',
 const SPAM_PATTERN = /https?:|www\.|:\/\/|@/i;
 const SUBMITTED_AT_MAX = 40;
 
-// Control characters (0 to 31 and 127), built without escape sequences on purpose.
-const CONTROL_CHARACTERS = new RegExp('[' + String.fromCharCode(0) + '-' + String.fromCharCode(31) + String.fromCharCode(127) + ']', 'g');
+// Control characters (0 to 31 and 127) and invisible ones (zero-width, direction marks,
+// byte order mark), built without escape sequences on purpose.
+const chr = (code) => String.fromCharCode(code);
+const CONTROL_CHARACTERS = new RegExp('[' + chr(0) + '-' + chr(31) + chr(127) + ']', 'g');
+const INVISIBLE_CHARACTERS = new RegExp('[' + chr(0x200B) + '-' + chr(0x200F) + chr(0x2028) + '-' + chr(0x202E) + chr(0x2060) + chr(0xFEFF) + ']', 'g');
+// Google Sheets reads a cell that starts with one of these as a formula or a number.
+const FORMULA_START = /^[=+\-@]+/;
+const SUBMITTED_AT_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 
 function cleanName(raw) {
   if (typeof raw !== 'string') return '';
-  return raw.replace(CONTROL_CHARACTERS, '').replace(/\s+/g, ' ').trim();
+  return raw
+    .replace(CONTROL_CHARACTERS, '')
+    .replace(INVISIBLE_CHARACTERS, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(FORMULA_START, '')
+    .trim();
 }
 
 function looksLikeSpam(name) {
@@ -224,7 +236,7 @@ function parseSubmission(raw) {
   if (name.length < 1 || name.length > NAME_MAX) errors.push(`name must be 1 to ${NAME_MAX} characters`);
 
   const email = typeof data.email === 'string' ? data.email.trim() : '';
-  if (!EMAIL_PATTERN_SERVER.test(email) || email.length > EMAIL_MAX) errors.push('email is not valid');
+  if (!EMAIL_PATTERN_SERVER.test(email) || email.length > EMAIL_MAX || FORMULA_START.test(email)) errors.push('email is not valid');
 
   if (typeof data.consent !== 'boolean') errors.push('consent must be true or false');
 
@@ -248,7 +260,9 @@ function parseSubmission(raw) {
 
   if (errors.length) return { ok: false, errors };
 
-  const submittedAt = typeof data.submitted_at === 'string' && data.submitted_at.length <= SUBMITTED_AT_MAX ? data.submitted_at : '';
+  const submittedAt = typeof data.submitted_at === 'string' && data.submitted_at.length <= SUBMITTED_AT_MAX && SUBMITTED_AT_PATTERN.test(data.submitted_at)
+    ? data.submitted_at
+    : '';
   const submission = {
     version: 1,
     name,
@@ -352,6 +366,7 @@ const HEADERS = [
 ];
 
 const AVERAGE_HEADERS = { F: 'Foundation avg', P: 'Professional avg', V: 'Visibility avg' };
+const AVERAGE_HEADER_NAMES = Object.keys(AVERAGE_HEADERS).map((key) => AVERAGE_HEADERS[key]);
 
 function round2(value) {
   return Math.round(value * 100) / 100;
@@ -388,9 +403,15 @@ function buildRecord({ receivedAt, submission, evaluation, pillars, emailStatus,
   return record;
 }
 
+// Google Sheets reads text that starts with = + - or @ as a formula or a number;
+// a leading space keeps it text. Dates and numbers pass through untouched.
+function safeCell(value) {
+  return typeof value === 'string' && /^[=+\-@]/.test(value) ? ` ${value}` : value;
+}
+
 // Values for one sheet row, aligned to the header row actually present in the sheet.
 function rowValues(headerRow, record) {
-  return headerRow.map((header) => (Object.prototype.hasOwnProperty.call(record, header) ? record[header] : ''));
+  return headerRow.map((header) => (Object.prototype.hasOwnProperty.call(record, header) ? safeCell(record[header]) : ''));
 }
 
 // 1-based column number of a header, 0 when the header is missing.
@@ -405,8 +426,9 @@ function missingHeaders(headerRow) {
 // ---- backend/src/email.js ----
 // The email with the result: subject, plain text and HTML, built only from content.json and
 // the checked fields of the submission. Pure functions. Table layout with inline styles so
-// it survives Gmail, Apple Mail and Outlook; colours are solid (email clients ignore
-// transparency), fonts are Georgia and Arial (web fonts are unreliable in email).
+// it survives Gmail, Apple Mail and Outlook (a conditional 600 px table for Outlook's Word
+// engine, which ignores max-width); colours are solid (email clients ignore transparency),
+// fonts are Georgia and Arial (web fonts are unreliable in email).
 
 
 
@@ -632,7 +654,7 @@ function renderHtml(content, submission, evaluation) {
   body.push(`<tr><td style="padding:28px 0 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${EMAIL_COLOURS.aubergine}" style="background-color:${EMAIL_COLOURS.aubergine};border-radius:12px;"><tr><td style="padding:24px;">`
     + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">`
     + row(`font-family:${HEADING_FONT};font-size:20px;line-height:26px;color:${EMAIL_COLOURS.white};padding:0 0 16px;`, escapeHtml(p.ctaQuestion))
-    + `<tr><td style="padding:0 0 12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${EMAIL_COLOURS.gold}" style="background-color:${EMAIL_COLOURS.gold};border-radius:10px;"><a href="${escapeHtml(p.link)}" style="display:inline-block;padding:16px 28px;font-family:${TEXT_FONT};font-size:16px;font-weight:bold;color:${EMAIL_COLOURS.navy};text-decoration:none;">${escapeHtml(p.ctaButton)}</a></td></tr></table></td></tr>`
+    + `<tr><td style="padding:0 0 12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${EMAIL_COLOURS.gold}" style="background-color:${EMAIL_COLOURS.gold};border-radius:10px;padding:16px 28px;"><a href="${escapeHtml(p.link)}" style="display:inline-block;font-family:${TEXT_FONT};font-size:16px;font-weight:bold;color:${EMAIL_COLOURS.navy};text-decoration:none;">${escapeHtml(p.ctaButton)}</a></td></tr></table></td></tr>`
     + row(`font-family:${TEXT_FONT};font-size:13px;line-height:18px;color:${EMAIL_COLOURS.onAubergine};`, escapeHtml(p.ctaNote))
     + `</table></td></tr></table></td></tr>`);
   body.push(row(`${TEXT_STYLE}padding:28px 0 4px;`, escapeHtml(p.closing)));
@@ -649,12 +671,14 @@ function renderHtml(content, submission, evaluation) {
 <title>${escapeHtml(p.subject)}</title>
 </head>
 <body style="margin:0;padding:0;background-color:${EMAIL_COLOURS.porcelain};">
-<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${EMAIL_COLOURS.porcelain};">${escapeHtml(p.preheader)}</div>
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${EMAIL_COLOURS.porcelain};mso-hide:all;">${escapeHtml(p.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${EMAIL_COLOURS.porcelain}" style="background-color:${EMAIL_COLOURS.porcelain};">
 <tr><td align="center" style="padding:24px 12px;">
+<!--[if mso]><table role="presentation" width="${EMAIL_WIDTH}" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:${EMAIL_WIDTH}px;">
 ${body.join('\n')}
 </table>
+<!--[if mso]></td></tr></table><![endif]-->
 </td></tr>
 </table>
 </body>
@@ -756,6 +780,13 @@ function errorNote(code, text) {
   return `Brevo ${code}: ${body.slice(0, 200)}`;
 }
 
+// Brevo reports the state of transactional sending as relay.enabled in GET /v3/account.
+// true or false when the field is there, null when it is not.
+function relayEnabled(json) {
+  if (!json || typeof json !== 'object' || !json.relay || typeof json.relay !== 'object') return null;
+  return json.relay.enabled === true;
+}
+
 // One line about GET /v3/account for checkSetup.
 function describeAccount(json) {
   if (!json || typeof json !== 'object') return 'account: no readable answer';
@@ -763,11 +794,11 @@ function describeAccount(json) {
   const planText = plans.length
     ? plans.map((plan) => `${plan.type || '?'}${plan.credits !== undefined ? ` (${plan.credits} ${plan.creditsType || 'credits'})` : ''}`).join(', ')
     : 'unknown';
-  const flagKeys = Object.keys(json).filter((key) => /transactional|smtp/i.test(key));
-  const flagText = flagKeys.length
-    ? flagKeys.map((key) => `${key}=${JSON.stringify(json[key])}`).join(', ')
-    : 'transactional flag not in the answer (the support ticket decides)';
-  return `account: ${json.email || json.companyName || 'ok'}; plan ${planText}; ${flagText}`;
+  const relay = relayEnabled(json);
+  const relayText = relay === null
+    ? 'transactional sending (relay): not in the answer, the support ticket decides'
+    : `transactional sending (relay): ${relay ? 'enabled' : 'NOT enabled'}`;
+  return `account: ${json.email || json.companyName || 'ok'}; plan ${planText}; ${relayText}`;
 }
 
 function describeSenders(json) {
@@ -878,11 +909,24 @@ function processSubmission(submission, rejected, services, options) {
     contactStatus = submission.consent ? STATUS.PENDING : STATUS.NO_CONSENT;
   }
 
+  const recordFor = () => buildRecord({
+    receivedAt: now,
+    submission,
+    evaluation,
+    pillars,
+    emailStatus,
+    contactStatus,
+    note: notes.join('; '),
+    consentLabel: content && content.email_step ? content.email_step.consent_label : '',
+  });
+
   // Counters and the first write of the row happen under the lock, so two requests
   // at the same moment cannot both pass the limits or mix up row numbers.
-  const rowInfo = services.withLock(() => {
-    if (emailStatus === STATUS.PENDING) {
-      const keys = counterKeys(services.hash(submission.email), now);
+  let rowInfo;
+  try {
+    rowInfo = services.withLock(() => {
+      if (emailStatus === STATUS.PENDING) {
+        const keys = counterKeys(services.hash(submission.email.toLowerCase()), now);
       const counters = services.counters.getAll();
       const lastSentAt = services.cache.get(keys.last);
       const decision = decideSending({
@@ -894,34 +938,33 @@ function processSubmission(submission, rejected, services, options) {
         needed,
         isTestEmail: isTestAddress(config, submission.email),
       });
-      if (decision.allowed) {
-        services.counters.set(keys.emailDay, Number(counters[keys.emailDay] || 0) + 1);
-        services.counters.set(keys.hour, Number(counters[keys.hour] || 0) + needed);
-        services.counters.set(keys.day, Number(counters[keys.day] || 0) + needed);
-        services.cache.put(keys.last, String(now.getTime()), LIMITS.PER_EMAIL_MIN_SECONDS);
-        const stale = staleCounterKeys(Object.keys(counters), now);
-        if (stale.length) services.counters.remove(stale);
-      } else {
-        emailStatus = STATUS.RATE_LIMITED;
-        contactStatus = submission.consent ? STATUS.SKIPPED : STATUS.NO_CONSENT;
-        notes.push(`limit: ${decision.reason}`);
+        if (decision.allowed) {
+          services.counters.set(keys.emailDay, Number(counters[keys.emailDay] || 0) + 1);
+          services.counters.set(keys.hour, Number(counters[keys.hour] || 0) + needed);
+          services.counters.set(keys.day, Number(counters[keys.day] || 0) + needed);
+          services.cache.put(keys.last, String(now.getTime()), LIMITS.PER_EMAIL_MIN_SECONDS);
+          const stale = staleCounterKeys(Object.keys(counters), now);
+          if (stale.length) services.counters.remove(stale);
+        } else {
+          // The email is held back; the consent still counts, the contact is still added.
+          emailStatus = STATUS.RATE_LIMITED;
+          notes.push(`limit: ${decision.reason}`);
+        }
       }
-    }
-    const record = buildRecord({
-      receivedAt: now,
-      submission,
-      evaluation,
-      pillars,
-      emailStatus,
-      contactStatus,
-      note: notes.join('; '),
-      consentLabel: content && content.email_step ? content.email_step.consent_label : '',
+      return services.sheet.append(recordFor());
     });
-    return services.sheet.append(record);
-  });
+  } catch (error) {
+    // The lock did not come in time (another request held it for too long): keep the
+    // response in the sheet, send nothing, say why.
+    notes.push(`lock: ${error && error.message ? error.message : error}`);
+    if (emailStatus === STATUS.PENDING) emailStatus = STATUS.FAILED;
+    if (contactStatus === STATUS.PENDING) contactStatus = STATUS.SKIPPED;
+    rowInfo = services.sheet.append(recordFor());
+  }
 
   const allowed = emailStatus === STATUS.PENDING;
 
+  try {
   if (emailStatus === STATUS.PENDING) {
     if (!content) {
       emailStatus = STATUS.FAILED;
@@ -990,6 +1033,12 @@ function processSubmission(submission, rejected, services, options) {
     const response = services.brevo('post', '/smtp/email', body);
     if (!isSuccess(response.code)) notes.push(`notification: ${errorNote(response.code, response.text)}`);
   }
+  } catch (error) {
+    // Whatever broke after the row was written (a service threw), the row gets final statuses.
+    if (emailStatus === STATUS.PENDING) emailStatus = STATUS.FAILED;
+    if (contactStatus === STATUS.PENDING) contactStatus = STATUS.FAILED;
+    notes.push(`error: ${error && error.message ? error.message : error}`);
+  }
 
   const note = notes.join('; ');
   services.sheet.update(rowInfo, { 'Email status': emailStatus, 'Contact status': contactStatus, Note: note });
@@ -1057,7 +1106,7 @@ function sheetService(config) {
       ensure();
       Object.keys(fields).forEach((header) => {
         const column = columnOf(rowInfo.headerRow, header);
-        if (column) sheet.getRange(rowInfo.rowIndex, column).setValue(fields[header]);
+        if (column) sheet.getRange(rowInfo.rowIndex, column).setValue(safeCell(fields[header]));
       });
     },
   };
@@ -1097,7 +1146,14 @@ function brevoCall(config, method, path, body) {
     options.contentType = 'application/json';
     options.payload = JSON.stringify(body);
   }
-  const response = UrlFetchApp.fetch(BREVO_BASE + path, options);
+  // muteHttpExceptions covers HTTP errors; DNS, timeout and SSL failures throw, so they
+  // are turned into an answer with code 0 and the error text.
+  let response;
+  try {
+    response = UrlFetchApp.fetch(BREVO_BASE + path, options);
+  } catch (error) {
+    return { code: 0, text: `request failed: ${error && error.message ? error.message : error}`, json: null };
+  }
   const code = response.getResponseCode();
   const text = response.getContentText();
   let json = null;
@@ -1185,6 +1241,10 @@ function setup() {
   const sheet = getOrCreateSheet(spreadsheet);
   const headerRow = ensureHeaders(sheet);
   sheet.setFrozenRows(1);
+  AVERAGE_HEADER_NAMES.forEach((header) => {
+    const column = columnOf(headerRow, header);
+    if (column && sheet.getMaxRows() > 1) sheet.getRange(2, column, sheet.getMaxRows() - 1, 1).setNumberFormat('0.00');
+  });
   const missing = missingHeaders(headerRow);
   console.log(`setup: spreadsheet "${spreadsheet.getName()}", sheet "${SHEET_NAME}", ${headerRow.length} columns${missing.length ? `, missing headers: ${missing.join(', ')}` : ''}, SHEET_ID saved`);
 }
@@ -1223,6 +1283,7 @@ function checkSetup() {
     const account = brevoCall(config, 'get', '/account');
     if (isSuccess(account.code)) {
       console.log(`brevo ${describeAccount(account.json)}`);
+      if (relayEnabled(account.json) === false) missing.push('transactional sending (relay) enabled in Brevo, ask support');
     } else {
       console.log(`brevo account: ${errorNote(account.code, account.text)}`);
       missing.push('a working BREVO_API_KEY');
@@ -1255,15 +1316,19 @@ function checkSetup() {
     }
   }
 
+  // Read-only: the sheet and its headers are only reported, never created here.
   try {
-    const sheet = getOrCreateSheet(openSpreadsheet(config));
-    const headerRow = ensureHeaders(sheet);
+    if (!config.SHEET_ID) throw new Error('SHEET_ID is not set, run setup first');
+    const sheet = SpreadsheetApp.openById(config.SHEET_ID).getSheetByName(SHEET_NAME);
+    if (!sheet) throw new Error(`no sheet "${SHEET_NAME}", run setup first`);
+    const lastColumn = sheet.getLastColumn();
+    const headerRow = lastColumn ? sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map((value) => String(value)) : [];
     const absent = missingHeaders(headerRow);
     console.log(`sheet: "${SHEET_NAME}" with ${headerRow.length} columns${absent.length ? `, missing headers: ${absent.join(', ')}` : ', all headers present'}`);
     if (absent.length) missing.push(`sheet headers ${absent.join(', ')}`);
   } catch (error) {
     console.log(`sheet: ${error.message}`);
-    missing.push('the Responses sheet (run setup)');
+    missing.push('the Responses sheet with its headers (run setup)');
   }
 
   console.log(missing.length ? `NOT READY: ${missing.join('; ')}` : 'READY: everything is in place');

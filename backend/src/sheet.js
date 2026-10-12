@@ -28,6 +28,7 @@ export const HEADERS = [
 ];
 
 const AVERAGE_HEADERS = { F: 'Foundation avg', P: 'Professional avg', V: 'Visibility avg' };
+export const AVERAGE_HEADER_NAMES = Object.keys(AVERAGE_HEADERS).map((key) => AVERAGE_HEADERS[key]);
 
 export function round2(value) {
   return Math.round(value * 100) / 100;
@@ -64,9 +65,15 @@ export function buildRecord({ receivedAt, submission, evaluation, pillars, email
   return record;
 }
 
+// Google Sheets reads text that starts with = + - or @ as a formula or a number;
+// a leading space keeps it text. Dates and numbers pass through untouched.
+export function safeCell(value) {
+  return typeof value === 'string' && /^[=+\-@]/.test(value) ? ` ${value}` : value;
+}
+
 // Values for one sheet row, aligned to the header row actually present in the sheet.
 export function rowValues(headerRow, record) {
-  return headerRow.map((header) => (Object.prototype.hasOwnProperty.call(record, header) ? record[header] : ''));
+  return headerRow.map((header) => (Object.prototype.hasOwnProperty.call(record, header) ? safeCell(record[header]) : ''));
 }
 
 // 1-based column number of a header, 0 when the header is missing.

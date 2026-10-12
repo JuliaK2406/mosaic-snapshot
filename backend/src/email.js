@@ -1,7 +1,8 @@
 // The email with the result: subject, plain text and HTML, built only from content.json and
 // the checked fields of the submission. Pure functions. Table layout with inline styles so
-// it survives Gmail, Apple Mail and Outlook; colours are solid (email clients ignore
-// transparency), fonts are Georgia and Arial (web fonts are unreliable in email).
+// it survives Gmail, Apple Mail and Outlook (a conditional 600 px table for Outlook's Word
+// engine, which ignores max-width); colours are solid (email clients ignore transparency),
+// fonts are Georgia and Arial (web fonts are unreliable in email).
 
 import { formatAverage, fillTemplate, growLineKind } from '../../src/app/scoring.js';
 
@@ -227,7 +228,7 @@ export function renderHtml(content, submission, evaluation) {
   body.push(`<tr><td style="padding:28px 0 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${EMAIL_COLOURS.aubergine}" style="background-color:${EMAIL_COLOURS.aubergine};border-radius:12px;"><tr><td style="padding:24px;">`
     + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">`
     + row(`font-family:${HEADING_FONT};font-size:20px;line-height:26px;color:${EMAIL_COLOURS.white};padding:0 0 16px;`, escapeHtml(p.ctaQuestion))
-    + `<tr><td style="padding:0 0 12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${EMAIL_COLOURS.gold}" style="background-color:${EMAIL_COLOURS.gold};border-radius:10px;"><a href="${escapeHtml(p.link)}" style="display:inline-block;padding:16px 28px;font-family:${TEXT_FONT};font-size:16px;font-weight:bold;color:${EMAIL_COLOURS.navy};text-decoration:none;">${escapeHtml(p.ctaButton)}</a></td></tr></table></td></tr>`
+    + `<tr><td style="padding:0 0 12px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${EMAIL_COLOURS.gold}" style="background-color:${EMAIL_COLOURS.gold};border-radius:10px;padding:16px 28px;"><a href="${escapeHtml(p.link)}" style="display:inline-block;font-family:${TEXT_FONT};font-size:16px;font-weight:bold;color:${EMAIL_COLOURS.navy};text-decoration:none;">${escapeHtml(p.ctaButton)}</a></td></tr></table></td></tr>`
     + row(`font-family:${TEXT_FONT};font-size:13px;line-height:18px;color:${EMAIL_COLOURS.onAubergine};`, escapeHtml(p.ctaNote))
     + `</table></td></tr></table></td></tr>`);
   body.push(row(`${TEXT_STYLE}padding:28px 0 4px;`, escapeHtml(p.closing)));
@@ -244,12 +245,14 @@ export function renderHtml(content, submission, evaluation) {
 <title>${escapeHtml(p.subject)}</title>
 </head>
 <body style="margin:0;padding:0;background-color:${EMAIL_COLOURS.porcelain};">
-<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${EMAIL_COLOURS.porcelain};">${escapeHtml(p.preheader)}</div>
+<div style="display:none;max-height:0;overflow:hidden;font-size:1px;line-height:1px;color:${EMAIL_COLOURS.porcelain};mso-hide:all;">${escapeHtml(p.preheader)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${EMAIL_COLOURS.porcelain}" style="background-color:${EMAIL_COLOURS.porcelain};">
 <tr><td align="center" style="padding:24px 12px;">
+<!--[if mso]><table role="presentation" width="${EMAIL_WIDTH}" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:${EMAIL_WIDTH}px;">
 ${body.join('\n')}
 </table>
+<!--[if mso]></td></tr></table><![endif]-->
 </td></tr>
 </table>
 </body>

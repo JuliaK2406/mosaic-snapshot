@@ -6,11 +6,11 @@
 import { evaluate } from '../../src/app/scoring.js';
 import { parseSubmission } from './validate.js';
 import { LIMITS, decideSending, counterKeys, staleCounterKeys } from './limits.js';
-import { SHEET_NAME, HEADERS, buildRecord, rowValues, columnOf, missingHeaders, resultLabel } from './sheet.js';
+import { SHEET_NAME, HEADERS, AVERAGE_HEADER_NAMES, buildRecord, rowValues, columnOf, missingHeaders, resultLabel, safeCell } from './sheet.js';
 import { renderEmail, renderNotification } from './email.js';
 import {
   BREVO_BASE, CONTACT_VARIANTS, brevoTags, emailRequest, notificationRequest, contactRequest,
-  isSuccess, isAttributeError, errorNote, describeAccount, describeSenders, describeLists, describeAttributes,
+  isSuccess, isAttributeError, errorNote, describeAccount, describeSenders, describeLists, describeAttributes, relayEnabled,
 } from './brevo.js';
 
 export const CONTENT_CACHE_SECONDS = 600;
@@ -87,11 +87,24 @@ export function processSubmission(submission, rejected, services, options) {
     contactStatus = submission.consent ? STATUS.PENDING : STATUS.NO_CONSENT;
   }
 
+  const recordFor = () => buildRecord({
+    receivedAt: now,
+    submission,
+    evaluation,
+    pillars,
+    emailStatus,
+    contactStatus,
+    note: notes.join('; '),
+    consentLabel: content && content.email_step ? content.email_step.consent_label : '',
+  });
+
   // Counters and the first write of the row happen under the lock, so two requests
   // at the same moment cannot both pass the limits or mix up row numbers.
-  const rowInfo = services.withLock(() => {
-    if (emailStatus === STATUS.PENDING) {
-      const keys = counterKeys(services.hash(submission.email), now);
+  let rowInfo;
+  try {
+    rowInfo = services.withLock(() => {
+      if (emailStatus === STATUS.PENDING) {
+        const keys = counterKeys(services.hash(submission.email.toLowerCase()), now);
       const counters = services.counters.getAll();
       const lastSentAt = services.cache.get(keys.last);
       const decision = decideSending({
@@ -103,34 +116,33 @@ export function processSubmission(submission, rejected, services, options) {
         needed,
         isTestEmail: isTestAddress(config, submission.email),
       });
-      if (decision.allowed) {
-        services.counters.set(keys.emailDay, Number(counters[keys.emailDay] || 0) + 1);
-        services.counters.set(keys.hour, Number(counters[keys.hour] || 0) + needed);
-        services.counters.set(keys.day, Number(counters[keys.day] || 0) + needed);
-        services.cache.put(keys.last, String(now.getTime()), LIMITS.PER_EMAIL_MIN_SECONDS);
-        const stale = staleCounterKeys(Object.keys(counters), now);
-        if (stale.length) services.counters.remove(stale);
-      } else {
-        emailStatus = STATUS.RATE_LIMITED;
-        contactStatus = submission.consent ? STATUS.SKIPPED : STATUS.NO_CONSENT;
-        notes.push(`limit: ${decision.reason}`);
+        if (decision.allowed) {
+          services.counters.set(keys.emailDay, Number(counters[keys.emailDay] || 0) + 1);
+          services.counters.set(keys.hour, Number(counters[keys.hour] || 0) + needed);
+          services.counters.set(keys.day, Number(counters[keys.day] || 0) + needed);
+          services.cache.put(keys.last, String(now.getTime()), LIMITS.PER_EMAIL_MIN_SECONDS);
+          const stale = staleCounterKeys(Object.keys(counters), now);
+          if (stale.length) services.counters.remove(stale);
+        } else {
+          // The email is held back; the consent still counts, the contact is still added.
+          emailStatus = STATUS.RATE_LIMITED;
+          notes.push(`limit: ${decision.reason}`);
+        }
       }
-    }
-    const record = buildRecord({
-      receivedAt: now,
-      submission,
-      evaluation,
-      pillars,
-      emailStatus,
-      contactStatus,
-      note: notes.join('; '),
-      consentLabel: content && content.email_step ? content.email_step.consent_label : '',
+      return services.sheet.append(recordFor());
     });
-    return services.sheet.append(record);
-  });
+  } catch (error) {
+    // The lock did not come in time (another request held it for too long): keep the
+    // response in the sheet, send nothing, say why.
+    notes.push(`lock: ${error && error.message ? error.message : error}`);
+    if (emailStatus === STATUS.PENDING) emailStatus = STATUS.FAILED;
+    if (contactStatus === STATUS.PENDING) contactStatus = STATUS.SKIPPED;
+    rowInfo = services.sheet.append(recordFor());
+  }
 
   const allowed = emailStatus === STATUS.PENDING;
 
+  try {
   if (emailStatus === STATUS.PENDING) {
     if (!content) {
       emailStatus = STATUS.FAILED;
@@ -199,6 +211,12 @@ export function processSubmission(submission, rejected, services, options) {
     const response = services.brevo('post', '/smtp/email', body);
     if (!isSuccess(response.code)) notes.push(`notification: ${errorNote(response.code, response.text)}`);
   }
+  } catch (error) {
+    // Whatever broke after the row was written (a service threw), the row gets final statuses.
+    if (emailStatus === STATUS.PENDING) emailStatus = STATUS.FAILED;
+    if (contactStatus === STATUS.PENDING) contactStatus = STATUS.FAILED;
+    notes.push(`error: ${error && error.message ? error.message : error}`);
+  }
 
   const note = notes.join('; ');
   services.sheet.update(rowInfo, { 'Email status': emailStatus, 'Contact status': contactStatus, Note: note });
@@ -266,7 +284,7 @@ function sheetService(config) {
       ensure();
       Object.keys(fields).forEach((header) => {
         const column = columnOf(rowInfo.headerRow, header);
-        if (column) sheet.getRange(rowInfo.rowIndex, column).setValue(fields[header]);
+        if (column) sheet.getRange(rowInfo.rowIndex, column).setValue(safeCell(fields[header]));
       });
     },
   };
@@ -306,7 +324,14 @@ function brevoCall(config, method, path, body) {
     options.contentType = 'application/json';
     options.payload = JSON.stringify(body);
   }
-  const response = UrlFetchApp.fetch(BREVO_BASE + path, options);
+  // muteHttpExceptions covers HTTP errors; DNS, timeout and SSL failures throw, so they
+  // are turned into an answer with code 0 and the error text.
+  let response;
+  try {
+    response = UrlFetchApp.fetch(BREVO_BASE + path, options);
+  } catch (error) {
+    return { code: 0, text: `request failed: ${error && error.message ? error.message : error}`, json: null };
+  }
   const code = response.getResponseCode();
   const text = response.getContentText();
   let json = null;
@@ -394,6 +419,10 @@ export function setup() {
   const sheet = getOrCreateSheet(spreadsheet);
   const headerRow = ensureHeaders(sheet);
   sheet.setFrozenRows(1);
+  AVERAGE_HEADER_NAMES.forEach((header) => {
+    const column = columnOf(headerRow, header);
+    if (column && sheet.getMaxRows() > 1) sheet.getRange(2, column, sheet.getMaxRows() - 1, 1).setNumberFormat('0.00');
+  });
   const missing = missingHeaders(headerRow);
   console.log(`setup: spreadsheet "${spreadsheet.getName()}", sheet "${SHEET_NAME}", ${headerRow.length} columns${missing.length ? `, missing headers: ${missing.join(', ')}` : ''}, SHEET_ID saved`);
 }
@@ -432,6 +461,7 @@ export function checkSetup() {
     const account = brevoCall(config, 'get', '/account');
     if (isSuccess(account.code)) {
       console.log(`brevo ${describeAccount(account.json)}`);
+      if (relayEnabled(account.json) === false) missing.push('transactional sending (relay) enabled in Brevo, ask support');
     } else {
       console.log(`brevo account: ${errorNote(account.code, account.text)}`);
       missing.push('a working BREVO_API_KEY');
@@ -464,15 +494,19 @@ export function checkSetup() {
     }
   }
 
+  // Read-only: the sheet and its headers are only reported, never created here.
   try {
-    const sheet = getOrCreateSheet(openSpreadsheet(config));
-    const headerRow = ensureHeaders(sheet);
+    if (!config.SHEET_ID) throw new Error('SHEET_ID is not set, run setup first');
+    const sheet = SpreadsheetApp.openById(config.SHEET_ID).getSheetByName(SHEET_NAME);
+    if (!sheet) throw new Error(`no sheet "${SHEET_NAME}", run setup first`);
+    const lastColumn = sheet.getLastColumn();
+    const headerRow = lastColumn ? sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map((value) => String(value)) : [];
     const absent = missingHeaders(headerRow);
     console.log(`sheet: "${SHEET_NAME}" with ${headerRow.length} columns${absent.length ? `, missing headers: ${absent.join(', ')}` : ', all headers present'}`);
     if (absent.length) missing.push(`sheet headers ${absent.join(', ')}`);
   } catch (error) {
     console.log(`sheet: ${error.message}`);
-    missing.push('the Responses sheet (run setup)');
+    missing.push('the Responses sheet with its headers (run setup)');
   }
 
   console.log(missing.length ? `NOT READY: ${missing.join('; ')}` : 'READY: everything is in place');
