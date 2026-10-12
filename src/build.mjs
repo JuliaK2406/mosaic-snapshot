@@ -1,5 +1,6 @@
 // Build: content/snapshot.yaml -> check -> dist/ with index.html (content embedded as JSON),
-// app.js, styles.css, favicon.svg and, while unpublished, robots.txt.
+// app.js, styles.css, favicon.svg, content.json and, while unpublished, robots.txt.
+// Also joins backend/src into backend/Code.gs for Google Apps Script (npm run backend).
 
 import { readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -13,6 +14,23 @@ const APP_DIR = path.join(ROOT, 'src', 'app');
 const STYLES_DIR = path.join(ROOT, 'src', 'styles');
 // Order matters: a module must come after every module it imports.
 const MODULES = ['dom.js', 'scoring.js', 'mosaic.js', 'submit.js', 'main.js'];
+// The Apps Script file: the page's own scoring and src cleaning, then the backend modules.
+export const BACKEND_SOURCES = [
+  'src/app/scoring.js',
+  'src/app/submit.js',
+  'backend/src/validate.js',
+  'backend/src/limits.js',
+  'backend/src/sheet.js',
+  'backend/src/email.js',
+  'backend/src/brevo.js',
+  'backend/src/entry.js',
+];
+export const CODE_GS = path.join(ROOT, 'backend', 'Code.gs');
+export const CODE_GS_HEADER = `// generated from backend/src, do not edit here
+// Rebuild with "npm run backend" (also part of "npm run build") and paste the whole file
+// into the Apps Script editor, then Deploy > Manage deployments > New version.
+// Sources, in order: ${BACKEND_SOURCES.join(', ')}
+`;
 const STYLES = ['tokens.css', 'app.css'];
 const FONTS_URL = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Lora:wght@500;600&display=swap';
 const ROBOTS_TXT = 'User-agent: *\nDisallow: /\n';
@@ -38,21 +56,24 @@ export function readToken(css, name) {
 }
 
 // Joins the ES modules into one file in the given order. Supported: named imports from a module
-// listed earlier ("import { a } from './x.js';") and "export function/const/let/class".
-// Any other import or export, an import of an unlisted module, a top-level name declared in two
-// modules, or a syntax error in the result stops the build.
+// listed earlier ("import { a } from './x.js';" or a ../ path when sources carry a file path)
+// and "export function/const/let/class". Any other import or export, an import of an unlisted
+// module, a top-level name declared in two modules, or a syntax error in the result stops the build.
 export function bundle(sources) {
-  const names = sources.map((source) => source.name);
+  const identity = (source) => (source.path ? path.resolve(source.path) : source.name);
+  const ids = sources.map(identity);
   const declared = new Map();
   const parts = [];
-  sources.forEach(({ name, code }, position) => {
+  sources.forEach((source, position) => {
+    const { name, code } = source;
     const imports = [];
-    let stripped = code.replace(/^import\s*\{[^}]*\}\s*from\s*'\.\/([^']+)';[ \t]*$/gm, (match, target) => {
+    let stripped = code.replace(/^import\s*\{[^}]*\}\s*from\s*'(\.\.?\/[^']+)';[ \t]*$/gm, (match, target) => {
       imports.push(target);
       return '';
     });
     for (const target of imports) {
-      const at = names.indexOf(target);
+      const wanted = source.path ? path.resolve(path.dirname(source.path), target) : target.replace(/^\.\//, '');
+      const at = ids.indexOf(wanted);
       if (at < 0) throw new Error(`${name}: imports ${target}, which is not in the module list`);
       if (at >= position) throw new Error(`${name}: imports ${target}, which must come earlier in the module list`);
     }
@@ -114,11 +135,40 @@ export function faviconSvg(colour = '#5E1A4D') {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">${cells}</svg>\n`;
 }
 
-export async function build() {
+// Reads backend/src and the two page modules it needs into one Apps Script file.
+export async function buildBackendCode() {
+  const sources = [];
+  for (const rel of BACKEND_SOURCES) {
+    const file = path.join(ROOT, rel);
+    sources.push({ name: rel, path: file, code: await readFile(file, 'utf8') });
+  }
+  return CODE_GS_HEADER + bundle(sources);
+}
+
+export async function buildBackend({ quiet = false } = {}) {
+  const code = await buildBackendCode();
+  await mkdir(path.dirname(CODE_GS), { recursive: true });
+  await writeFile(CODE_GS, code, 'utf8');
+  if (!quiet) console.log(`  backend/Code.gs  ${Buffer.byteLength(code)} bytes`);
+  return code;
+}
+
+// options.distDir: where to write (default dist/); options.endpointUrl: replaces backend.endpoint_url
+// in this build only (also read from SNAPSHOT_ENDPOINT_URL, for the local sending check, never in CI);
+// options.backend: also rebuild backend/Code.gs (default true).
+export async function build(options = {}) {
+  const distDir = options.distDir || DIST;
+  const quiet = Boolean(options.quiet);
+  const log = quiet ? () => {} : console.log;
   const content = await loadContent();
   const result = report(content, checkContent(content));
-  console.log(result.lines.join('\n'));
+  log(result.lines.join('\n'));
   if (!result.ok) throw new Error('Content check failed, nothing was built');
+  const endpointUrl = options.endpointUrl || process.env.SNAPSHOT_ENDPOINT_URL || '';
+  if (endpointUrl) {
+    content.backend.endpoint_url = endpointUrl;
+    log(`  endpoint override: ${endpointUrl}`);
+  }
 
   const sources = [];
   for (const name of MODULES) sources.push({ name, code: await readFile(path.join(APP_DIR, name), 'utf8') });
@@ -131,17 +181,19 @@ export async function build() {
     'app.js': bundle(sources),
     'styles.css': styles.join('\n'),
     'favicon.svg': faviconSvg(readToken(tokens, '--aubergine')),
+    'content.json': JSON.stringify(content),
   };
   if (!content.meta.published) files['robots.txt'] = ROBOTS_TXT;
 
-  await rm(DIST, { recursive: true, force: true });
-  await mkdir(DIST, { recursive: true });
-  for (const [name, body] of Object.entries(files)) await writeFile(path.join(DIST, name), body, 'utf8');
+  await rm(distDir, { recursive: true, force: true });
+  await mkdir(distDir, { recursive: true });
+  for (const [name, body] of Object.entries(files)) await writeFile(path.join(distDir, name), body, 'utf8');
   for (const name of Object.keys(files)) {
-    const { size } = await stat(path.join(DIST, name));
-    console.log(`  dist/${name}  ${size} bytes`);
+    const { size } = await stat(path.join(distDir, name));
+    log(`  ${path.relative(ROOT, path.join(distDir, name))}  ${size} bytes`);
   }
-  console.log(content.meta.published
+  if (options.backend !== false) await buildBackend({ quiet });
+  log(content.meta.published
     ? 'Published mode: indexable, no robots.txt, sample link hidden'
     : 'Unpublished mode: noindex, robots.txt with Disallow, sample link visible');
   return files;

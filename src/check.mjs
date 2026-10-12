@@ -68,6 +68,16 @@ const SHAPE = {
     legal_line: 'string',
   },
   results: 'results',
+  email: {
+    subject: 'string',
+    preheader: 'string',
+    greeting: 'string',
+    intro: 'string',
+    scores_title: 'string',
+    closing: 'string',
+    why_line: 'string',
+    notify_subject: 'string',
+  },
 };
 
 // Strings that must keep their placeholders.
@@ -76,6 +86,9 @@ const PLACEHOLDERS = [
   ['result.copy_line', ['{email}']],
   ['result.grow_match', ['{grow}']],
   ['result.grow_mismatch', ['{grow}', '{focus}']],
+  ['email.subject', ['{name}']],
+  ['email.greeting', ['{name}']],
+  ['email.notify_subject', ['{name}', '{result}']],
 ];
 
 // The only value that may be empty: no backend yet means nothing is sent.

@@ -219,3 +219,13 @@ results:
       - >-
         Name one habit or boundary that keeps your mosaic in balance, and protect it.
     cta_question: "Curious what your next chapter could look like?"
+
+email:   # the result email. Draft wording, waiting for Julia's OK
+  subject: "{name}, here is your Mosaic of Life Snapshot"
+  preheader: "Your result, what it means and your first three steps."
+  greeting: "Hi {name},"
+  intro: "Thank you for taking the Mosaic of Life Snapshot. Here is your result and your first three steps, so you can come back to them anytime."
+  scores_title: "Your Mosaic"
+  closing: "Warmly,"
+  why_line: "You are receiving this email because you asked for your result at mosaic.juliakrylova.com."
+  notify_subject: "New Mosaic Snapshot: {name}, {result}"   # optional alert to Julia about each new response
