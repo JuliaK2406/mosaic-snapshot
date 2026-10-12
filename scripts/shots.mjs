@@ -26,6 +26,7 @@ export const labels = {
   sample: content.intro.sample_label,
   name: content.email_step.name_label,
   email: content.email_step.email_label,
+  consent: content.email_step.consent_label,
 };
 const growLabel = (key) => content.grow_question.options.find((option) => option.key === key).label;
 
@@ -66,20 +67,21 @@ export async function grow(page, key) {
   await waitStep(page, 'email');
 }
 
-export async function fillEmail(page, { name, email }) {
+export async function fillEmail(page, { name, email, consent = false }) {
   await page.getByLabel(labels.name, { exact: true }).fill(name);
   await page.getByLabel(labels.email, { exact: true }).fill(email);
+  if (consent) await page.getByLabel(labels.consent, { exact: true }).check();
 }
 
 export async function submit(page) {
   await page.getByRole('button', { name: labels.submit, exact: true }).click();
 }
 
-export async function complete(page, { answers, grow: growKey, name, email }) {
+export async function complete(page, { answers, grow: growKey, name, email, consent = false }) {
   await start(page);
   await answer(page, answers);
   await grow(page, growKey);
-  await fillEmail(page, { name, email });
+  await fillEmail(page, { name, email, consent });
   await submit(page);
   await waitStep(page, 'result');
 }

@@ -1020,11 +1020,22 @@ a {
     display: none;
   }
 
+  /* Wide screens: each column is blurred inside its own clip, so the three columns stay
+     apart as soft bands while the tiles inside melt together. */
   .mosaic-blur--large {
     --mosaic-scale: 1.7;
     display: block;
     width: min(100%, 420px);
-    filter: blur(64px);
+    filter: none;
+  }
+
+  .mosaic-blur--large .mosaic__col {
+    overflow: hidden;
+    border-radius: calc(var(--radius-lg) * 1.5);
+  }
+
+  .mosaic-blur--large .mosaic__tiles {
+    filter: blur(64px); /* about 0.7 of a tile height: no single tile survives, even with 1 and 10 side by side */
   }
 
   .form {
@@ -1108,6 +1119,18 @@ a {
   .screen--result.result--tall .cta {
     display: flex;
     border-radius: var(--radius-lg);
+  }
+}
+
+/* Tablets in portrait, 600 to 899 px: the first screen is not stretched to the window,
+   so the Start button follows the text instead of sitting at the bottom of a tall screen. */
+@media (min-width: 600px) and (max-width: 899px) {
+  .screen--intro {
+    min-height: 0;
+  }
+
+  .intro__actions {
+    margin-top: 10px;
   }
 }
 

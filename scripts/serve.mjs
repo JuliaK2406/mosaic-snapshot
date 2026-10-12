@@ -1,6 +1,8 @@
 // Small static server for dist/ on node:http. For local checks only.
 // Run: npm run serve (PORT=4173 by default). The site is served at / and also at
 // /mosaic-snapshot/, the path it will have on the GitHub Pages preview.
+// POST /__endpoint collects request bodies (the page's sending check), GET /__endpoint
+// returns them as JSON, GET /__endpoint?clear=1 empties the list.
 
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -22,9 +24,25 @@ const TYPES = {
 };
 
 export function createStaticServer(dir = DIST) {
+  const captured = [];
   return createServer(async (req, res) => {
     try {
-      let pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+      const requestUrl = new URL(req.url, 'http://localhost');
+      let pathname = decodeURIComponent(requestUrl.pathname);
+      if (pathname === '/__endpoint' || pathname === `${PREVIEW_BASE}/__endpoint`) {
+        if (req.method === 'POST') {
+          const chunks = [];
+          for await (const chunk of req) chunks.push(chunk);
+          captured.push({ contentType: req.headers['content-type'] || '', body: Buffer.concat(chunks).toString('utf8') });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end('{"ok":true}');
+          return;
+        }
+        if (requestUrl.searchParams.get('clear')) captured.length = 0;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(captured));
+        return;
+      }
       if (pathname === PREVIEW_BASE) {
         res.writeHead(301, { Location: `${PREVIEW_BASE}/` });
         res.end();

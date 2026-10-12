@@ -3,8 +3,12 @@
 // palette, history, validation, privacy, reduced motion, relative paths.
 // Run after npm run build: npm run verify
 
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { chromium } from 'playwright';
 import { loadContent } from '../src/check.mjs';
+import { build } from '../src/build.mjs';
 import { startServer, PREVIEW_BASE } from './serve.mjs';
 import { start, answer, grow, fillEmail, submit, waitStep, complete, back, labels, PERSON, RESULT_SETTLE_MS } from './shots.mjs';
 
@@ -555,7 +559,7 @@ try {
         return {
           bigDisplay: getComputedStyle(big).display,
           smallDisplay: getComputedStyle(small).display,
-          filter: getComputedStyle(big).filter,
+          filter: getComputedStyle(big.querySelector('.mosaic__tiles')).filter,
           hidden: big.getAttribute('aria-hidden'),
           tiles: [...big.querySelectorAll('.mosaic__tile')].map((t) => getComputedStyle(t).backgroundColor),
           scores: document.querySelectorAll('.mosaic-blur .mosaic__score, .mosaic-blur .mosaic__flag').length,
@@ -672,17 +676,69 @@ try {
   }
 
   await section('blur strength and line length', async () => {
-    const { page, context } = await open({ viewport: { width: 1440, height: 900 } });
+    let { page, context } = await open({ viewport: { width: 1440, height: 900 } });
     await start(page);
     await answer(page, [1, 10, 1, 10, 10, 1, 10, 1, 1, 10, 1, 10]);
     await grow(page, 'F');
-    const blur = await page.evaluate(() => {
-      const big = document.querySelector('.mosaic-blur--large');
-      const tile = big.querySelector('.mosaic__tile');
-      const radius = parseFloat((getComputedStyle(big).filter.match(/blur\(([\d.]+)px\)/) || [])[1]);
-      return { radius, tileWidth: tile.getBoundingClientRect().width };
-    });
-    check('1440: blur radius is at least 0.45 of the tile width, so single tiles cannot be read', blur.radius >= 0.45 * blur.tileWidth, JSON.stringify(blur));
+    await context.close();
+    for (const [w, h] of [[1440, 900], [960, 800]]) {
+      for (const [label, answers] of [['uniform', new Array(12).fill(8)], ['contrasting', [1, 10, 1, 10, 10, 1, 10, 1, 1, 10, 1, 10]]]) {
+        const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+        const p = await ctx.newPage();
+        await p.goto(`${url}/`, { waitUntil: 'networkidle' });
+        await start(p);
+        await answer(p, answers);
+        await grow(p, 'F');
+        await p.waitForTimeout(300);
+        const structure = await p.evaluate(() => {
+          const big = document.querySelector('.mosaic-blur--large');
+          const cols = [...big.querySelectorAll('.mosaic__col')];
+          const tiles = [...big.querySelectorAll('.mosaic__tile')];
+          const meanTile = tiles.reduce((sum, t) => sum + t.getBoundingClientRect().height, 0) / tiles.length;
+          const inner = parseFloat((getComputedStyle(cols[0].querySelector('.mosaic__tiles')).filter.match(/blur\(([\d.]+)px\)/) || [])[1]) || 0;
+          const rects = cols.map((c) => { const r = c.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; });
+          const box = big.getBoundingClientRect();
+          return { cols: cols.length, clipped: cols.every((c) => getComputedStyle(c).overflow === 'hidden'), inner, meanTile, rects, box: { x: box.left, y: box.top, w: box.width, h: box.height } };
+        });
+        check(`${w}: blurred mosaic (${label}) is clipped per column with an inner blur of at least 0.4 of a tile height`,
+          structure.cols === 3 && structure.clipped && structure.inner >= 0.4 * structure.meanTile, JSON.stringify({ inner: structure.inner, meanTile: Math.round(structure.meanTile), clipped: structure.clipped }));
+        const shot = (await p.screenshot({ clip: { x: structure.box.x, y: structure.box.y, width: structure.box.w, height: structure.box.h } })).toString('base64');
+        const measured = await p.evaluate(async ([src, rects, box]) => {
+          const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = `data:image/png;base64,${src}`; });
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx2 = canvas.getContext('2d');
+          ctx2.drawImage(img, 0, 0);
+          const data = ctx2.getImageData(0, 0, img.width, img.height).data;
+          const scale = img.width / box.w;
+          // "purple" = how far a pixel is from porcelain towards aubergine, 0 to 1
+          const purple = (x, y) => { const i = (Math.round(y) * img.width + Math.round(x)) * 4; return 1 - (data[i + 1] - 26) / (248 - 26); };
+          const yFrom = Math.round(box.h * 0.2 * scale);
+          const yTo = Math.round(box.h * 0.8 * scale);
+          const columnMean = (x) => { let s = 0; let n = 0; for (let y = yFrom; y < yTo; y += 2) { s += purple(x, y); n += 1; } return s / n; };
+          const columnSpread = (x) => { const values = []; for (let y = yFrom; y < yTo; y += 2) values.push(purple(x, y)); return Math.max(...values) - Math.min(...values); };
+          const centers = rects.map((r) => ((r.left + r.right) / 2 - box.x) * scale);
+          const gaps = [((rects[0].right + rects[1].left) / 2 - box.x) * scale, ((rects[1].right + rects[2].left) / 2 - box.x) * scale];
+          return { centers: centers.map(columnMean), gaps: gaps.map(columnMean), spreads: centers.map(columnSpread) };
+        }, [shot, structure.rects, structure.box]);
+        const minCenter = Math.min(...measured.centers);
+        const maxGap = Math.max(...measured.gaps);
+        const maxSpread = Math.max(...measured.spreads);
+        check(`${w}: blurred mosaic (${label}): three columns read as separate bands, no single tile readable`,
+          maxGap < 0.5 * minCenter && maxSpread < 0.6 * minCenter,
+          JSON.stringify({ centers: measured.centers.map((v) => v.toFixed(2)), gaps: measured.gaps.map((v) => v.toFixed(2)), spreads: measured.spreads.map((v) => v.toFixed(2)) }));
+        await ctx.close();
+      }
+    }
+    const context2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page2 = await context2.newPage();
+    await page2.goto(`${url}/`, { waitUntil: 'networkidle' });
+    await start(page2);
+    await answer(page2, [1, 10, 1, 10, 10, 1, 10, 1, 1, 10, 1, 10]);
+    await grow(page2, 'F');
+    page = page2;
+    context = context2;
     const lead = await page.evaluate(() => {
       const l = document.querySelector('.lead');
       return l ? { width: l.getBoundingClientRect().width, size: parseFloat(getComputedStyle(l).fontSize) } : null;
@@ -743,6 +799,18 @@ try {
     const { page, context } = await open({ viewport: { width: 834, height: 1194 }, isMobile: true, hasTouch: true });
     const t = await page.evaluate(() => ({ aside: getComputedStyle(document.querySelector('.screen__aside')).display, display: getComputedStyle(document.querySelector('.screen--intro')).display }));
     check('834 px: phone design, no aside, single column', t.aside === 'none' && t.display === 'flex', JSON.stringify(t));
+    const gap = await page.evaluate(() => {
+      const meta = document.querySelector('.meta-line').getBoundingClientRect();
+      const button = document.querySelector('.btn--primary').getBoundingClientRect();
+      return { gap: Math.round(button.top - meta.bottom), buttonBottom: Math.round(button.bottom), inner: window.innerHeight };
+    });
+    check('834 px: the Start button follows the text instead of sitting at the bottom', gap.gap <= 60 && gap.buttonBottom < gap.inner - 200, JSON.stringify(gap));
+    const narrowTablet = await browser.newContext({ viewport: { width: 768, height: 1024 }, isMobile: true, hasTouch: true });
+    const tpage = await narrowTablet.newPage();
+    await tpage.goto(`${url}/`, { waitUntil: 'networkidle' });
+    const gap2 = await tpage.evaluate(() => Math.round(document.querySelector('.btn--primary').getBoundingClientRect().top - document.querySelector('.meta-line').getBoundingClientRect().bottom));
+    check('768 px: the Start button follows the text too', gap2 <= 60, String(gap2));
+    await narrowTablet.close();
     await start(page);
     const cols = await page.evaluate(() => getComputedStyle(document.querySelector('.rates')).gridTemplateColumns.split(' ').length);
     check('834 px: digits in the 5 x 2 grid', cols === 5, String(cols));
@@ -765,6 +833,73 @@ try {
     check('390 x 664: compact blurred mosaic about 96 px beside the title, aria-hidden, no scores', m.w >= 90 && m.w <= 102 && m.h >= 90 && m.h <= 104 && /blur\(/.test(m.filter) && m.hidden === 'true' && m.rightOfTitle && m.scores === 0, JSON.stringify(m));
     check('390 x 664: the submit button is visible without scrolling', m.scrollY === 0 && m.buttonBottom <= m.inner, JSON.stringify(m));
     await context.close();
+  });
+  // ---------- the page really sends the payload ----------
+  await section('sending', async () => {
+    const tmp = await mkdtemp(path.join(os.tmpdir(), 'mosaic-send-'));
+    const capture = await startServer(0, tmp);
+    try {
+      await build({ distDir: tmp, endpointUrl: `${capture.url}/__endpoint`, backend: false, quiet: true });
+      const posts = async () => (await (await fetch(`${capture.url}/__endpoint`)).json());
+      const clear = () => fetch(`${capture.url}/__endpoint?clear=1`);
+      const sendContext = await browser.newContext(MOBILE);
+      let page = await sendContext.newPage();
+      await page.goto(`${capture.url}/?src=Test_QR!`, { waitUntil: 'networkidle' });
+      await complete(page, { answers: CASES.P.answers, grow: 'V', ...PERSON, consent: true });
+      await page.waitForTimeout(800);
+      let seen = await posts();
+      check('sending: exactly one POST after the survey', seen.length === 1, `${seen.length} posts`);
+      const body = seen.length ? JSON.parse(seen[0].body) : {};
+      const onScreen = await page.evaluate(() => document.querySelector('.heading-sm').textContent);
+      const keyOnScreen = Object.keys(content.results).find((key) => content.results[key].headline === onScreen);
+      check('sending: body is text/plain JSON with version 1, 12 answers, the result on the screen, consent and the cleaned src',
+        seen.length === 1 && /text\/plain/.test(seen[0].contentType) && body.version === 1 && Object.keys(body.answers || {}).length === 12
+          && body.answers.P2 === 5 && body.result === keyOnScreen && body.consent === true && body.src === 'test_qr' && body.name === PERSON.name && body.email === PERSON.email && typeof body.submitted_at === 'string',
+        JSON.stringify(body).slice(0, 300));
+      await page.close();
+      await clear();
+      page = await sendContext.newPage();
+      await page.goto(`${capture.url}/`, { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: labels.sample, exact: true }).click();
+      await waitStep(page, 'result');
+      await page.waitForTimeout(800);
+      seen = await posts();
+      check('sending: the sample result sends nothing', seen.length === 0, `${seen.length} posts`);
+      await page.close();
+      await clear();
+      page = await sendContext.newPage();
+      await page.goto(`${capture.url}/`, { waitUntil: 'networkidle' });
+      await start(page);
+      await answer(page, CASES.V.answers);
+      await grow(page, 'F');
+      await fillEmail(page, PERSON);
+      await page.evaluate(() => { const form = document.querySelector('form'); form.requestSubmit(); form.requestSubmit(); });
+      await waitStep(page, 'result');
+      await page.waitForTimeout(800);
+      seen = await posts();
+      check('sending: a double submit sends one POST', seen.length === 1, `${seen.length} posts`);
+      await sendContext.close();
+    } finally {
+      capture.server.close();
+      await rm(tmp, { recursive: true, force: true });
+    }
+    const tmp2 = await mkdtemp(path.join(os.tmpdir(), 'mosaic-dead-'));
+    const dead = await startServer(0, tmp2);
+    try {
+      await build({ distDir: tmp2, endpointUrl: 'http://127.0.0.1:9/__endpoint', backend: false, quiet: true });
+      const deadContext = await browser.newContext(MOBILE);
+      const page = await deadContext.newPage();
+      await page.goto(`${dead.url}/`, { waitUntil: 'networkidle' });
+      await complete(page, { answers: CASES.F.answers, grow: 'V', ...PERSON });
+      await page.waitForTimeout(RESULT_SETTLE_MS);
+      const shown = await page.evaluate(() => ({ step: document.getElementById('app').dataset.step, headline: document.querySelector('.heading-sm').textContent }));
+      check('sending: with an unreachable endpoint the result still shows', shown.step === 'result' && shown.headline === content.results.F.headline, JSON.stringify(shown));
+      await deadContext.close();
+    } finally {
+      dead.server.close();
+      await rm(tmp2, { recursive: true, force: true });
+    }
+    await build({ quiet: true, backend: false });
   });
 } finally {
   await browser.close();
