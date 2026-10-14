@@ -12,7 +12,7 @@ links:
   main_site: https://www.juliakrylova.com
 
 backend:
-  endpoint_url: ""   # filled in at stage 2. Empty = nothing is sent anywhere
+  endpoint_url: "https://script.google.com/macros/s/AKfycby0-tvzUtyy1HF81L0rGmo9XvqQaLWjzdk6odXZN6lqZEtl4jlGf4NPPYjqlaxbvtQ/exec"   # the Apps Script web app. Empty = nothing is sent anywhere
 
 logic:
   balanced_gap: 3        # gap = 10 minus a pillar average. Balanced when every gap is below this number

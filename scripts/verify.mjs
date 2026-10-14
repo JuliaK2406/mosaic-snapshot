@@ -40,8 +40,14 @@ const TILE_HEIGHTS = [62, 46, 54, 50, 48, 60, 46, 58, 56, 50, 62, 44];
 const TILE_RANKS = [0, 5, 2, 9, 4, 7, 1, 10, 3, 8, 6, 11];
 const MOBILE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
-const { server, url } = await startServer(0);
+// verify runs against its own build in a temporary folder with the endpoint pointed at a
+// closed local port, so a real endpoint in the yaml never receives test submissions.
+const DEAD_ENDPOINT = 'http://127.0.0.1:9/__endpoint';
+const verifyDist = await mkdtemp(path.join(os.tmpdir(), 'mosaic-verify-'));
+await build({ distDir: verifyDist, endpointUrl: DEAD_ENDPOINT, backend: false, quiet: true });
+const { server, url } = await startServer(0, verifyDist);
 const browser = await chromium.launch();
+const isOwnRequest = (x) => x.startsWith(url) || x.startsWith(DEAD_ENDPOINT) || /^https:\/\/fonts\.(googleapis|gstatic)\.com\//.test(x);
 
 async function open(options = MOBILE, pathname = '/', before) {
   const context = await browser.newContext(options);
@@ -157,8 +163,8 @@ try {
       check(`result ${key}: link opens in a new tab with rel=noopener`, link.rel === 'noopener' && link.target === '_blank');
       check(`result ${key}: page is scrolled to the top`, (await page.evaluate(() => window.scrollY)) === 0);
 
-      const external = requests.filter((x) => !x.startsWith(url) && !/^https:\/\/fonts\.(googleapis|gstatic)\.com\//.test(x));
-      check(`result ${key}: no requests except own files and Google Fonts`, external.length === 0, external.join(', '));
+      const external = requests.filter((x) => !isOwnRequest(x));
+      check(`result ${key}: no requests except own files, Google Fonts and the page's own endpoint`, external.length === 0, external.join(', '));
       const storage = await page.evaluate(() => ({ ls: localStorage.length, ss: sessionStorage.length, cookie: document.cookie }));
       check(`result ${key}: no localStorage, sessionStorage or cookies`, storage.ls === 0 && storage.ss === 0 && storage.cookie === '');
 
@@ -186,7 +192,7 @@ try {
       text.includes(norm(content.results.F.headline)) && text.includes(norm(content.result.greeting)) && text.includes(norm(expectedLine)) && !text.includes(norm(content.result.greeting_with_name.replace('{name}', ''))));
     check('sample result: no copy line without an email', !text.includes('on its way'));
     const external = requests.filter((x) => !x.startsWith(url) && !/^https:\/\/fonts\./.test(x));
-    check('sample result: nothing is sent anywhere', external.length === 0);
+    check('sample result: nothing is sent anywhere, not even to the endpoint', external.length === 0, external.join(', '));
     await page.goBack();
     await waitStep(page, 'intro');
     check('sample result: back leads to the first screen', true);
@@ -904,6 +910,7 @@ try {
 } finally {
   await browser.close();
   server.close();
+  await rm(verifyDist, { recursive: true, force: true });
 }
 
 const failed = results.filter((r) => !r.ok);
