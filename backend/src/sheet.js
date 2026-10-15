@@ -12,7 +12,7 @@ export const HEADERS = [
   'Newsletter consent',
   'Source',
   'Result',
-  'Wants to grow',
+  'Priority',
   'Foundation avg',
   'Professional avg',
   'Visibility avg',
@@ -49,7 +49,7 @@ export function buildRecord({ receivedAt, submission, evaluation, pillars, email
   record['Newsletter consent'] = submission.consent ? 'Yes' : 'No';
   record['Source'] = submission.src || 'direct';
   record['Result'] = resultLabel(evaluation.result, pillars);
-  record['Wants to grow'] = resultLabel(submission.grow, pillars);
+  record.Priority = resultLabel(submission.grow, pillars);
   Object.keys(AVERAGE_HEADERS).forEach((key) => {
     record[AVERAGE_HEADERS[key]] = round2(evaluation.averages[key]);
   });
@@ -83,4 +83,15 @@ export function columnOf(headerRow, header) {
 
 export function missingHeaders(headerRow) {
   return HEADERS.filter((header) => headerRow.indexOf(header) < 0);
+}
+
+// Headers that changed name since an earlier version of the sheet; the old cell is renamed
+// in place, the values below it stay.
+export const HEADER_RENAMES = { 'Wants to grow': 'Priority' };
+
+// [{ column (1-based), from, to }] for every old header that is present while the new one is not.
+export function headerRenames(headerRow) {
+  return Object.keys(HEADER_RENAMES)
+    .filter((from) => headerRow.indexOf(from) >= 0 && headerRow.indexOf(HEADER_RENAMES[from]) < 0)
+    .map((from) => ({ column: headerRow.indexOf(from) + 1, from, to: HEADER_RENAMES[from] }));
 }

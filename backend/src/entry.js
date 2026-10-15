@@ -6,7 +6,8 @@
 import { evaluate } from '../../src/app/scoring.js';
 import { parseSubmission } from './validate.js';
 import { LIMITS, decideSending, counterKeys, staleCounterKeys } from './limits.js';
-import { SHEET_NAME, HEADERS, AVERAGE_HEADER_NAMES, buildRecord, rowValues, columnOf, missingHeaders, resultLabel, safeCell } from './sheet.js';
+import { SHEET_NAME, HEADERS, AVERAGE_HEADER_NAMES, buildRecord, rowValues, columnOf, missingHeaders, resultLabel, safeCell, headerRenames } from './sheet.js';
+import { SUMMARY_SHEET_NAME, summaryLayout, questionItems, pillarLabels, columnLetter } from './summary.js';
 import { renderEmail, renderNotification } from './email.js';
 import {
   BREVO_BASE, CONTACT_VARIANTS, brevoTags, emailRequest, notificationRequest, contactRequest,
@@ -253,7 +254,8 @@ function getOrCreateSheet(spreadsheet) {
   return spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.insertSheet(SHEET_NAME);
 }
 
-// The header row as it is in the sheet; written when the first row is empty.
+// The header row as it is in the sheet; written when the first row is empty. An old header
+// name (Wants to grow) is renamed in place, once; the values below it stay.
 function ensureHeaders(sheet) {
   const lastColumn = sheet.getLastColumn();
   const row = lastColumn ? sheet.getRange(1, 1, 1, lastColumn).getValues()[0] : [];
@@ -262,7 +264,56 @@ function ensureHeaders(sheet) {
     sheet.setFrozenRows(1);
     return HEADERS.slice();
   }
-  return row.map((value) => String(value));
+  const headerRow = row.map((value) => String(value));
+  headerRenames(headerRow).forEach((rename) => {
+    sheet.getRange(1, rename.column).setValue(rename.to);
+    headerRow[rename.column - 1] = rename.to;
+  });
+  return headerRow;
+}
+
+// Everything setup() does, with the spreadsheet and the properties passed in, so the tests
+// run it on a fake. Returns the log lines.
+export function runSetup({ spreadsheet, props, loaded }) {
+  const lines = [];
+  props.setProperty('SHEET_ID', spreadsheet.getId());
+  const responses = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.insertSheet(SHEET_NAME);
+  const before = responses.getLastColumn() ? responses.getRange(1, 1, 1, responses.getLastColumn()).getValues()[0].map((value) => String(value)) : [];
+  const renames = headerRenames(before);
+  const headerRow = ensureHeaders(responses);
+  responses.setFrozenRows(1);
+  AVERAGE_HEADER_NAMES.forEach((header) => {
+    const column = columnOf(headerRow, header);
+    if (column && responses.getMaxRows() > 1) responses.getRange(2, column, responses.getMaxRows() - 1, 1).setNumberFormat('0.00');
+  });
+  const missing = missingHeaders(headerRow);
+  lines.push(`setup: spreadsheet "${spreadsheet.getName()}", sheet "${SHEET_NAME}", ${headerRow.length} columns${renames.length ? `, renamed ${renames.map((r) => `${r.from} to ${r.to}`).join(', ')}` : ''}${missing.length ? `, missing headers: ${missing.join(', ')}` : ''}, SHEET_ID saved`);
+
+  const content = loaded ? loaded.content : null;
+  const layout = summaryLayout({
+    pillars: pillarLabels(content),
+    items: questionItems(content),
+    lastColumn: columnLetter(Math.max(responses.getMaxColumns(), HEADERS.length)),
+  });
+  let summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
+  if (!summary) summary = spreadsheet.insertSheet(SUMMARY_SHEET_NAME);
+  summary.clear();
+  const grid = [];
+  for (let r = 0; r < layout.rows; r += 1) grid.push(new Array(layout.columns).fill(''));
+  layout.cells.forEach((cell) => {
+    grid[cell.row - 1][cell.column - 1] = cell.value;
+  });
+  summary.getRange(1, 1, layout.rows, layout.columns).setValues(grid);
+  layout.formulas.forEach((cell) => summary.getRange(cell.row, cell.column).setFormula(cell.formula));
+  layout.formats.forEach((format) => summary.getRange(format.row, format.column, format.rows, format.columns).setNumberFormat(format.format));
+  layout.bold.forEach((range) => summary.getRange(range.row, range.column, range.rows, range.columns).setFontWeight('bold'));
+  summary.hideColumns(layout.hiddenColumns.start, layout.hiddenColumns.count);
+  summary.autoResizeColumns(layout.autoResize.start, layout.autoResize.count);
+  spreadsheet.setActiveSheet(summary);
+  spreadsheet.moveActiveSheet(1);
+  const names = content ? 'question names from the content' : `question codes F1 to V4 (content not read${loaded && loaded.error ? `: ${loaded.error}` : ''}); run setup again when CONTENT_URL works`;
+  lines.push(`setup: sheet "${SUMMARY_SHEET_NAME}" rebuilt as the first tab with ${layout.formulas.length} formulas, ${names}`);
+  return lines;
 }
 
 function sheetService(config) {
@@ -397,8 +448,9 @@ export function doGet() {
   return ContentService.createTextOutput('Mosaic Snapshot endpoint');
 }
 
-// Creates the Responses sheet with its headers, freezes the header row and remembers the
-// spreadsheet in SHEET_ID. Safe to run again.
+// Creates the Responses sheet with its headers (renaming old ones in place), freezes the
+// header row, remembers the spreadsheet in SHEET_ID and rebuilds the Summary sheet as the
+// first tab. Safe to run again; run it again after the question texts change.
 export function setup() {
   const props = scriptProperties();
   const config = props.getProperties();
@@ -415,16 +467,8 @@ export function setup() {
     console.log('setup: no spreadsheet. Open the script from the sheet (Extensions > Apps Script) or set SHEET_ID.');
     return;
   }
-  props.setProperty('SHEET_ID', spreadsheet.getId());
-  const sheet = getOrCreateSheet(spreadsheet);
-  const headerRow = ensureHeaders(sheet);
-  sheet.setFrozenRows(1);
-  AVERAGE_HEADER_NAMES.forEach((header) => {
-    const column = columnOf(headerRow, header);
-    if (column && sheet.getMaxRows() > 1) sheet.getRange(2, column, sheet.getMaxRows() - 1, 1).setNumberFormat('0.00');
-  });
-  const missing = missingHeaders(headerRow);
-  console.log(`setup: spreadsheet "${spreadsheet.getName()}", sheet "${SHEET_NAME}", ${headerRow.length} columns${missing.length ? `, missing headers: ${missing.join(', ')}` : ''}, SHEET_ID saved`);
+  const lines = runSetup({ spreadsheet, props, loaded: loadContentFromUrl(config) });
+  lines.forEach((line) => console.log(line));
 }
 
 function maskKey(value) {

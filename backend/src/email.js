@@ -277,7 +277,7 @@ export function renderNotification(content, submission, evaluation) {
     `Name: ${submission.name}`,
     `Email: ${submission.email}`,
     `Result: ${resultName}`,
-    `Wants to grow: ${pillarShort(content, submission.grow)}`,
+    `Priority: ${pillarShort(content, submission.grow)}`,
   ];
   content.pillars.forEach((pillar) => lines.push(`${pillar.short}: ${formatAverage(evaluation.averages[pillar.key])} ${content.result.score_suffix}`));
   lines.push(`Newsletter consent: ${submission.consent ? 'Yes' : 'No'}`);

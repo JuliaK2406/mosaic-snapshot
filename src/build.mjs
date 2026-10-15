@@ -21,6 +21,7 @@ export const BACKEND_SOURCES = [
   'backend/src/validate.js',
   'backend/src/limits.js',
   'backend/src/sheet.js',
+  'backend/src/summary.js',
   'backend/src/email.js',
   'backend/src/brevo.js',
   'backend/src/entry.js',
@@ -155,12 +156,15 @@ export async function buildBackend({ quiet = false } = {}) {
 
 // options.distDir: where to write (default dist/); options.endpointUrl: replaces backend.endpoint_url
 // in this build only (also read from SNAPSHOT_ENDPOINT_URL, for the local sending check, never in CI);
-// options.backend: also rebuild backend/Code.gs (default true).
+// options.patch: a function that changes the loaded content before the check, for temporary builds
+// in verify and screenshots only (published mode, placeholder texts); options.backend: also rebuild
+// backend/Code.gs (default true).
 export async function build(options = {}) {
   const distDir = options.distDir || DIST;
   const quiet = Boolean(options.quiet);
   const log = quiet ? () => {} : console.log;
   const content = await loadContent();
+  if (typeof options.patch === 'function') options.patch(content);
   const result = report(content, checkContent(content));
   log(result.lines.join('\n'));
   if (!result.ok) throw new Error('Content check failed, nothing was built');
@@ -195,8 +199,8 @@ export async function build(options = {}) {
   }
   if (options.backend !== false) await buildBackend({ quiet });
   log(content.meta.published
-    ? 'Published mode: indexable, no robots.txt, sample link hidden'
-    : 'Unpublished mode: noindex, robots.txt with Disallow, sample link visible');
+    ? 'Published mode: indexable, no robots.txt, no sample result'
+    : 'Unpublished mode: noindex, robots.txt with Disallow, sample result at ?sample');
   return files;
 }
 

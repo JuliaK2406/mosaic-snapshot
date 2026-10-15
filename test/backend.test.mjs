@@ -9,7 +9,9 @@ import { parseSubmission, cleanName, looksLikeSpam, ANSWER_KEYS } from '../backe
 import { safeCell } from '../backend/src/sheet.js';
 import { relayEnabled, describeAccount } from '../backend/src/brevo.js';
 import { LIMITS, decideSending, counterKeys, staleCounterKeys, dayKey, hourKey } from '../backend/src/limits.js';
-import { HEADERS, buildRecord, rowValues, columnOf, missingHeaders, resultLabel } from '../backend/src/sheet.js';
+import { HEADERS, buildRecord, rowValues, columnOf, missingHeaders, resultLabel, headerRenames } from '../backend/src/sheet.js';
+import { summaryLayout, questionItems, pillarLabels, columnLetter, balanced, ROWS, SUMMARY_SHEET_NAME } from '../backend/src/summary.js';
+import { runSetup } from '../backend/src/entry.js';
 import { renderEmail, renderNotification, EMAIL_TILE_HEIGHTS, emailTileAlpha, tileHex, NOTE_BACKGROUND, withParams, escapeHtml } from '../backend/src/email.js';
 import { emailRequest, contactRequest, notificationRequest, isAttributeError, brevoTags, describeLists, describeAttributes } from '../backend/src/brevo.js';
 import { processSubmission, FALLBACK_CONTENT, STATUS, SAMPLE_ANSWERS } from '../backend/src/entry.js';
@@ -254,6 +256,8 @@ test('email: the notification to Julia has the subject from the yaml and the fac
   const alert = renderNotification(content, { name: 'Anna', email: 'anna@example.com', src: '', grow: 'P', consent: true }, ev);
   assert.equal(alert.subject, content.email.notify_subject.replace('{name}', 'Anna').replace('{result}', 'Professional'));
   assert.ok(alert.text.includes('Email: anna@example.com'));
+  assert.ok(alert.text.includes('Priority: Professional'));
+  assert.ok(!alert.text.includes('Wants to grow'));
   assert.ok(alert.text.includes('Professional: 4.5 / 10'));
   assert.ok(alert.text.includes('Newsletter consent: Yes'));
   assert.ok(alert.text.includes('Source: direct'));
@@ -536,4 +540,175 @@ test('email: Outlook gets a fixed 600 px table, the preheader is hidden there to
   assert.ok(message.html.includes('<!--[if mso]></td></tr></table><![endif]-->'));
   assert.ok(message.html.includes('mso-hide:all;'));
   assert.ok(/border-radius:10px;padding:16px 28px;"><a href=/.test(message.html));
+});
+
+// ---------- Priority column and the Summary sheet ----------
+
+test('sheet: the column is called Priority, an old Wants to grow header is renamed once', () => {
+  assert.equal(HEADERS[6], 'Priority');
+  assert.ok(!HEADERS.includes('Wants to grow'));
+  const old = HEADERS.map((h) => (h === 'Priority' ? 'Wants to grow' : h));
+  assert.deepEqual(headerRenames(old), [{ column: 7, from: 'Wants to grow', to: 'Priority' }]);
+  assert.deepEqual(headerRenames(HEADERS), []);
+  assert.deepEqual(headerRenames(['Wants to grow', 'Priority']), [], 'nothing to rename when Priority already exists');
+  const record = buildRecord({ receivedAt: 'now', submission, evaluation, pillars: content.pillars, emailStatus: 's', contactStatus: 'a', note: '', consentLabel: '' });
+  assert.equal(record.Priority, 'Visibility');
+});
+
+const layout = summaryLayout({ pillars: pillarLabels(content), items: questionItems(content), lastColumn: 'AB' });
+const allFormulas = layout.formulas.map((f) => f.formula);
+const COLUMN_REF = /INDEX\(Responses!\$A\$2:\$AB,0,MATCH\("([^"]+)",Responses!\$1:\$1,0\)\)/g;
+
+test('summary: every reference to Responses goes through MATCH on a header text', () => {
+  const headersUsed = new Set();
+  for (const f of allFormulas) {
+    const stripped = f.replace(COLUMN_REF, (m, header) => { headersUsed.add(header); return 'COL'; });
+    assert.ok(!stripped.includes('Responses!'), `direct reference in ${f.slice(0, 120)}`);
+  }
+  for (const header of headersUsed) assert.ok(HEADERS.includes(header), `unknown header ${header}`);
+  assert.ok(headersUsed.size >= 8, [...headersUsed].join(', '));
+});
+
+test('summary: no formula touches First name or Email, every one over Responses excludes test rows', () => {
+  for (const f of allFormulas) {
+    assert.ok(!f.includes('"First name"') && !f.includes('"Email"'), f.slice(0, 120));
+    if (f.includes('Responses!')) assert.ok(f.includes('"<>test"') || f.includes('<>"test"') || f.includes("<> 'test'"), `no test exclusion in ${f.slice(0, 120)}`);
+  }
+});
+
+test('summary: brackets and quotes are paired in every formula', () => {
+  for (const f of allFormulas) assert.ok(balanced(f), f.slice(0, 120));
+  assert.equal(balanced('=IF(A1="x",1,2)'), true);
+  assert.equal(balanced('=IF(A1="x",1,2'), false);
+  assert.equal(balanced('=IF(A1="x,1,2)'), false);
+  assert.equal(columnLetter(1), 'A');
+  assert.equal(columnLetter(28), 'AB');
+  assert.equal(columnLetter(53), 'BA');
+});
+
+test('summary: twelve question rows with names from the content, codes without it', () => {
+  const withContent = questionItems(content);
+  assert.equal(withContent.length, 12);
+  assert.deepEqual(withContent[0], { pillarShort: 'Foundation', title: content.pillars[0].items[0].title, code: 'F1' });
+  assert.deepEqual(withContent[11], { pillarShort: 'Visibility', title: content.pillars[2].items[3].title, code: 'V4' });
+  const helperTitles = layout.cells.filter((c) => c.column === 9 && c.row >= ROWS.questionsFirst).map((c) => c.value);
+  assert.deepEqual(helperTitles, withContent.map((item) => item.title));
+  const fallback = questionItems(null);
+  assert.equal(fallback.length, 12);
+  assert.deepEqual(fallback[4], { pillarShort: 'P', title: 'P1', code: 'P1' });
+  assert.deepEqual(pillarLabels(null), [{ key: 'F' }, { key: 'P' }, { key: 'V' }]);
+  const bare = summaryLayout({ pillars: pillarLabels(null), items: fallback, lastColumn: 'AB' });
+  assert.ok(bare.cells.some((c) => c.row === ROWS.resultFirst && c.value === 'F'));
+  assert.ok(bare.formulas.some((f) => f.formula.includes('MATCH("V4"')));
+});
+
+test('summary: the sections and the sorted table are where the layout says', () => {
+  const at = (row, column) => layout.cells.find((c) => c.row === row && c.column === column);
+  assert.equal(at(ROWS.responsesTitle, 1).value, 'Responses');
+  assert.equal(at(ROWS.resultTitle, 1).value, 'Result');
+  assert.equal(at(ROWS.priorityTitle, 1).value, 'Priority');
+  assert.equal(at(ROWS.resultFirst + 3, 1).value, 'Balanced');
+  assert.equal(at(ROWS.averageTitle, 1).value, 'Average by pillar');
+  const sortFormula = layout.formulas.find((f) => f.row === ROWS.questionsFirst && f.column === 1).formula;
+  assert.equal(sortFormula, '=SORT($H$30:$K$41,3,TRUE)');
+  const query = layout.formulas.find((f) => f.row === ROWS.sourceFirst && f.column === 1).formula;
+  assert.ok(query.startsWith('=IFERROR(QUERY({') && query.includes("where Col1 <> 'test'") && query.includes('order by count(Col1) desc'));
+  assert.equal(layout.formulas.filter((f) => f.column === 4 && f.row >= ROWS.sourceFirst).length, 30);
+  assert.ok(layout.formats.some((f) => f.format === '0%') && layout.formats.some((f) => f.format === '0.00') && layout.formats.some((f) => f.format === 'yyyy-mm-dd hh:mm'));
+  assert.deepEqual(layout.hiddenColumns, { start: 8, count: 4 });
+});
+
+function fakeSpreadsheet(initial = {}) {
+  const sheets = new Map();
+  let order = [];
+  const makeSheet = (name, rows = []) => {
+    const grid = rows.map((r) => r.slice());
+    const formulas = new Map();
+    const formats = new Map();
+    const weights = new Map();
+    const hidden = [];
+    const resized = [];
+    let frozen = 0;
+    const ensure = (r, c) => { while (grid.length < r) grid.push([]); const row = grid[r - 1]; while (row.length < c) row.push(''); };
+    const sheet = {
+      name, grid, formulas, formats, weights, hidden, resized,
+      getName: () => name,
+      getLastColumn: () => grid.reduce((m, row) => Math.max(m, row.length), 0),
+      getLastRow: () => grid.length,
+      getMaxRows: () => Math.max(grid.length, 1000),
+      getMaxColumns: () => Math.max(sheet.getLastColumn(), 26),
+      setFrozenRows: (n) => { frozen = n; },
+      getFrozenRows: () => frozen,
+      clear: () => { grid.length = 0; formulas.clear(); formats.clear(); weights.clear(); },
+      // hiding or resizing the same columns again changes nothing in a real sheet
+      hideColumns: (start, count) => { if (!hidden.some(([s, c]) => s === start && c === count)) hidden.push([start, count]); },
+      autoResizeColumns: (start, count) => { if (!resized.some(([s, c]) => s === start && c === count)) resized.push([start, count]); },
+      getRange: (r, c, nr = 1, nc = 1) => ({
+        getValues: () => { ensure(r + nr - 1, c + nc - 1); return grid.slice(r - 1, r - 1 + nr).map((row) => row.slice(c - 1, c - 1 + nc)); },
+        setValues: (values) => values.forEach((row, i) => row.forEach((v, j) => { ensure(r + i, c + j); grid[r + i - 1][c + j - 1] = v; })),
+        setValue: (v) => { ensure(r, c); grid[r - 1][c - 1] = v; },
+        setFormula: (f) => { ensure(r, c); formulas.set(`${r},${c}`, f); grid[r - 1][c - 1] = f; },
+        setNumberFormat: (fmt) => { for (let i = 0; i < nr; i += 1) for (let j = 0; j < nc; j += 1) formats.set(`${r + i},${c + j}`, fmt); },
+        setFontWeight: (w) => { for (let i = 0; i < nr; i += 1) for (let j = 0; j < nc; j += 1) weights.set(`${r + i},${c + j}`, w); },
+      }),
+    };
+    return sheet;
+  };
+  const spreadsheet = {
+    active: null,
+    getId: () => 'fake-id',
+    getName: () => 'Fake',
+    getSheetByName: (name) => sheets.get(name) || null,
+    insertSheet: (name) => { const s = makeSheet(name); sheets.set(name, s); order.push(name); return s; },
+    setActiveSheet: (s) => { spreadsheet.active = s; },
+    moveActiveSheet: (position) => { order = order.filter((n) => n !== spreadsheet.active.name); order.splice(position - 1, 0, spreadsheet.active.name); },
+    order: () => order,
+    sheets,
+  };
+  Object.entries(initial).forEach(([name, rows]) => { sheets.set(name, makeSheet(name, rows)); order.push(name); });
+  return spreadsheet;
+}
+const snapshot = (sheet) => JSON.stringify({ grid: sheet.grid, formulas: [...sheet.formulas], formats: [...sheet.formats], weights: [...sheet.weights], hidden: sheet.hidden, frozen: sheet.getFrozenRows() });
+
+test('setup on a fake spreadsheet: renames the old header once, keeps the rows, builds Summary first, repeats without changes', () => {
+  const oldHeaders = HEADERS.map((h) => (h === 'Priority' ? 'Wants to grow' : h));
+  const newRecord = buildRecord({ receivedAt: 'd1', submission, evaluation, pillars: content.pillars, emailStatus: 'sent', contactStatus: 'added', note: '', consentLabel: 'c' });
+  const oldRecord = { ...newRecord, 'Wants to grow': newRecord.Priority };
+  delete oldRecord.Priority;
+  const dataRow = rowValues(oldHeaders, oldRecord);
+  const spreadsheet = fakeSpreadsheet({ Responses: [oldHeaders, dataRow] });
+  const props = { values: {}, setProperty(key, value) { this.values[key] = value; } };
+  const first = runSetup({ spreadsheet, props, loaded: { content, error: '' } });
+  const responses = spreadsheet.getSheetByName('Responses');
+  assert.equal(responses.grid[0][6], 'Priority');
+  assert.equal(responses.grid[1][6], 'Visibility', 'the value below the renamed header stays');
+  assert.deepEqual(responses.grid[1], dataRow);
+  assert.equal(props.values.SHEET_ID, 'fake-id');
+  assert.ok(first[0].includes('renamed Wants to grow to Priority'), first[0]);
+  assert.ok(first[1].includes('Summary') && first[1].includes('question names from the content'), first[1]);
+  assert.equal(spreadsheet.order()[0], SUMMARY_SHEET_NAME);
+  const summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
+  assert.ok(summary.formulas.size > 60);
+  assert.equal(summary.grid[0][0].startsWith('Figures update by themselves'), true);
+  assert.ok(summary.formulas.get(`${ROWS.total},2`).includes('MATCH("Result"'));
+  assert.deepEqual(summary.hidden, [[8, 4]]);
+  const responsesAfterFirst = snapshot(responses);
+  const summaryAfterFirst = snapshot(summary);
+  const second = runSetup({ spreadsheet, props, loaded: { content, error: '' } });
+  assert.ok(!second[0].includes('renamed'), 'the rename happens once');
+  assert.equal(snapshot(responses), responsesAfterFirst, 'Responses is untouched by a second run');
+  assert.equal(snapshot(spreadsheet.getSheetByName(SUMMARY_SHEET_NAME)), summaryAfterFirst, 'the Summary sheet is rebuilt identically');
+  assert.equal(spreadsheet.order().filter((n) => n === SUMMARY_SHEET_NAME).length, 1);
+});
+
+test('setup on an empty fake spreadsheet writes the new headers and the fallback Summary when content is missing', () => {
+  const spreadsheet = fakeSpreadsheet();
+  const props = { values: {}, setProperty(key, value) { this.values[key] = value; } };
+  const lines = runSetup({ spreadsheet, props, loaded: { content: null, error: 'content.json answered 404' } });
+  assert.deepEqual(spreadsheet.getSheetByName('Responses').grid[0], HEADERS);
+  assert.equal(spreadsheet.getSheetByName('Responses').getFrozenRows(), 1);
+  assert.ok(lines[1].includes('question codes F1 to V4') && lines[1].includes('404'), lines[1]);
+  const summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
+  assert.equal(summary.grid[ROWS.questionsFirst - 1][8], 'F1');
+  assert.equal(summary.grid[ROWS.resultFirst - 1][0], 'F');
 });
