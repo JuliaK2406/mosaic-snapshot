@@ -25,11 +25,13 @@ intro:
   meta_line: "13 questions · 2 minutes · free"
   start_label: "Start"
   author_line: "Created by Julia Krylova, strategic mentor for women leaders, based on her Mosaic of Life Method™."
-  sample_label: "See a sample result"   # shown only while meta.published is false
+  audience: ""   # who the Snapshot is for and why, 1 to 3 sentences. Shown under the subhead; empty = not shown. See the character budget in README
+  instruction: ""   # one sentence on what to rate: how true each statement is for you today. Shown above the Start button; empty = not shown
 
 question:
   prompt: "Where are you today?"
   back_label: "Back"
+  next_label: "Next"
   scale:
     - { value: 1, label: "a constant struggle" }
     - { value: 5, label: "OK, but not thriving" }
@@ -70,9 +72,9 @@ pillars:
       - title: "Thought leadership"
         note: "My ideas shape decisions"
 
-grow_question:   # question 13. Draft wording, waiting for Julia's OK
+grow_question:   # question 13. Title from Julia (15 Oct); the three option labels are a draft, waiting for her OK
   eyebrow: "YOUR PRIORITY"
-  title: "Which area would you most like to grow right now?"
+  title: "Which area has your priority right now?"
   subtitle: "Choose one."
   options:
     - key: F
@@ -93,7 +95,7 @@ email_step:
   email_label: "Email"
   consent_label: "Yes, I would like to receive letters from Julia. I can unsubscribe at any time."
   submit_label: "Show my Mosaic"
-  data_note: "Mastermind Global B.V. uses your name and email to show you your result and send you a copy."
+  data_note: "Mastermind Global B.V. uses your name and email to show your result and send you a copy."
   error_name: "Please enter your first name."
   error_email: "Please enter a valid email address."
 
@@ -105,14 +107,14 @@ result:
   score_suffix: "/ 10"
   legend_low: "Needs attention"
   legend_high: "Strong"
-  grow_match: "You said you would most like to grow your {grow}, and your answers agree. Here is where to start."   # draft, waiting for Julia's OK
-  grow_mismatch: "You said you would most like to grow your {grow}. Your answers suggest starting with your {focus}. Here is why."   # draft, waiting for Julia's OK
+  grow_match: "Your priority right now is your {grow}, and your answers agree. Here is where to start."   # draft, waiting for Julia's OK
+  grow_mismatch: "Your priority right now is your {grow}. Your answers suggest starting with your {focus}. Here is why."   # draft, waiting for Julia's OK
   section_labels:
     what_it_means: "What it means"
     how_it_affects: "How it affects the rest of your life mosaic"
     whats_next: "What's next"
     first_steps: "Your first three steps"
-  cta_button: "Book a free 30-minute call"
+  cta_button: "Book an introduction call"
   cta_note: "With Julia Krylova"
   copy_line: "A copy of your results is on its way to {email}."
   retake_label: "Retake the Snapshot"

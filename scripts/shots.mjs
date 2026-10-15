@@ -23,7 +23,6 @@ export const labels = {
   start: content.intro.start_label,
   back: content.question.back_label,
   submit: content.email_step.submit_label,
-  sample: content.intro.sample_label,
   name: content.email_step.name_label,
   email: content.email_step.email_label,
   consent: content.email_step.consent_label,
@@ -127,7 +126,7 @@ export const SCENARIOS = [
     id: '10-result-sample',
     full: true,
     run: async (page) => {
-      await page.getByRole('button', { name: labels.sample, exact: true }).click();
+      await page.goto(`${page.url()}?sample`, { waitUntil: 'networkidle' });
       await waitStep(page, 'result');
     },
   },

@@ -10,7 +10,10 @@ import { chromium } from 'playwright';
 import { loadContent } from '../src/check.mjs';
 import { build } from '../src/build.mjs';
 import { startServer, PREVIEW_BASE } from './serve.mjs';
+import { placeholder } from './shots-fixes.mjs';
 import { start, answer, grow, fillEmail, submit, waitStep, complete, back, labels, PERSON, RESULT_SETTLE_MS } from './shots.mjs';
+import { renderEmail } from '../backend/src/email.js';
+import { evaluate } from '../src/app/scoring.js';
 
 const content = await loadContent();
 const results = [];
@@ -59,11 +62,13 @@ async function open(options = MOBILE, pathname = '/', before) {
   return { page, context, requests };
 }
 
+// VERIFY_ONLY=<text> runs only the sections whose name contains the text (for debugging a scenario).
 async function section(name, fn) {
+  if (process.env.VERIFY_ONLY && !name.includes(process.env.VERIFY_ONLY)) return;
   try {
     await fn();
   } catch (error) {
-    check(`${name}: finished without an exception`, false, error.message);
+    check(`${name}: finished without an exception`, false, `${error.message} ${error.stack ? error.stack.split('\n').slice(1, 3).join(' ') : ''}`);
   }
 }
 
@@ -178,12 +183,13 @@ try {
     });
   }
 
-  // ---------- sample link ----------
+  // ---------- sample result: only from ?sample, only while unpublished ----------
   await section('sample', async () => {
-    const { page, context, requests } = await open();
-    const visible = await page.getByRole('button', { name: labels.sample, exact: true }).isVisible();
-    check('sample link is visible while meta.published is false', visible);
-    await page.getByRole('button', { name: labels.sample, exact: true }).click();
+    const { page: intro, context: introContext } = await open();
+    const links = await intro.evaluate(() => document.querySelectorAll('.screen--intro .link-button, .screen--intro a').length);
+    check('first screen has no link to the sample result', links === 0, String(links));
+    await introContext.close();
+    const { page, context, requests } = await open(MOBILE, '/?sample');
     await waitStep(page, 'result');
     await page.waitForTimeout(RESULT_SETTLE_MS);
     const text = norm(await page.evaluate(() => document.getElementById('app').textContent));
@@ -197,6 +203,21 @@ try {
     await waitStep(page, 'intro');
     check('sample result: back leads to the first screen', true);
     await context.close();
+    const publishedDist = await mkdtemp(path.join(os.tmpdir(), 'mosaic-published-'));
+    const published = await startServer(0, publishedDist);
+    try {
+      await build({ distDir: publishedDist, endpointUrl: DEAD_ENDPOINT, backend: false, quiet: true, patch: (c) => { c.meta.published = true; } });
+      const ctx = await browser.newContext(MOBILE);
+      const p = await ctx.newPage();
+      await p.goto(`${published.url}/?sample`, { waitUntil: 'networkidle' });
+      await p.waitForTimeout(600);
+      const state = await p.evaluate(() => ({ step: document.getElementById('app').dataset.step, robots: document.querySelector('meta[name="robots"]') !== null }));
+      check('published build: ?sample does nothing, the first screen stays', state.step === 'intro' && !state.robots, JSON.stringify(state));
+      await ctx.close();
+    } finally {
+      published.server.close();
+      await rm(publishedDist, { recursive: true, force: true });
+    }
   });
 
   // ---------- horizontal overflow and fonts ----------
@@ -800,6 +821,184 @@ try {
     await short.close();
   });
 
+  // ---------- Next button ----------
+  for (const viewport of [{ name: '390', ...MOBILE }, { name: '1440', viewport: { width: 1440, height: 900 } }]) {
+    await section(`next ${viewport.name}`, async () => {
+      const { page, context } = await open(viewport);
+      const nextState = () => page.evaluate(() => {
+        const next = document.querySelector('.next');
+        return next ? { hidden: next.hidden, visible: next.getClientRects().length > 0, text: next.textContent } : null;
+      });
+      const selectedRate = () => page.evaluate(() => [...document.querySelectorAll('.rate')].findIndex((b) => b.classList.contains('is-selected')) + 1);
+      await start(page);
+      const fresh = await nextState();
+      check(`${viewport.name}: on a new question Next exists but is hidden`, fresh && fresh.hidden && !fresh.visible && fresh.text === content.question.next_label, JSON.stringify(fresh));
+      await answer(page, [5, 6, 7, 4, 8]);
+      await back(page);
+      await waitStep(page, 'q', 4);
+      await back(page);
+      await waitStep(page, 'q', 3);
+      const shown = await nextState();
+      const geometry = await page.evaluate(() => {
+        const next = document.querySelector('.next').getBoundingClientRect();
+        const backRect = document.querySelector('.back').getBoundingClientRect();
+        const count = document.querySelector('.topbar__count').getBoundingClientRect();
+        const middle = (r) => r.top + r.height / 2;
+        return { nextHeight: Math.round(next.height), nextRight: Math.round(next.right), countCenter: Math.round((count.left + count.right) / 2), backLeft: Math.round(backRect.left), inner: window.innerWidth, sameRow: Math.abs(middle(next) - middle(backRect)) < 2 && Math.abs(middle(count) - middle(backRect)) < 3 };
+      });
+      check(`${viewport.name}: after two Backs Next is visible on the right, same row, at least 44 px tall`, shown && !shown.hidden && shown.visible && geometry.nextHeight >= 44 && geometry.sameRow && geometry.nextRight > geometry.countCenter, JSON.stringify({ shown, geometry }));
+      const countBefore = await page.evaluate(() => document.querySelector('.topbar__count').getBoundingClientRect().left);
+      await page.locator('.next').click();
+      await waitStep(page, 'q', 4);
+      const midway = await page.evaluate(() => ({ counter: document.querySelector('.topbar__count').textContent, countLeft: document.querySelector('.topbar__count').getBoundingClientRect().left }));
+      check(`${viewport.name}: Next once shows question 5 with its answer 8`, midway.counter === '5 / 13' && (await selectedRate()) === 8, JSON.stringify(midway));
+      await page.locator('.next').click();
+      await waitStep(page, 'q', 5);
+      const after = await page.evaluate(() => ({ qi: document.getElementById('app').dataset.qi, counter: document.querySelector('.topbar__count').textContent, answered: document.querySelectorAll('.mosaic--live .is-answered').length, countLeft: document.querySelector('.topbar__count').getBoundingClientRect().left }));
+      check(`${viewport.name}: Next twice returns to the farthest question (6) with the five answers intact`, after.qi === '5' && after.counter === '6 / 13' && (await selectedRate()) === 0 && after.answered === 5, JSON.stringify(after));
+      check(`${viewport.name}: the counter did not move while Next was shown and hidden`, Math.abs(after.countLeft - countBefore) < 1 && Math.abs(midway.countLeft - countBefore) < 1, `${countBefore} vs ${midway.countLeft} vs ${after.countLeft}`);
+      const onNew = await nextState();
+      check(`${viewport.name}: on the farthest question, which has no answer, Next is hidden`, onNew && onNew.hidden, JSON.stringify(onNew));
+      await page.locator('.rate', { hasText: /^6$/ }).click();
+      const during = await nextState();
+      check(`${viewport.name}: right after a fresh answer Next does not flash during the highlight`, during && during.hidden, JSON.stringify(during));
+      await waitStep(page, 'q', 6);
+      await page.goBack();
+      await waitStep(page, 'q', 5);
+      await page.keyboard.press('ArrowRight');
+      await waitStep(page, 'q', 6);
+      check(`${viewport.name}: the right arrow works like Next when Next is visible`, true);
+      await page.keyboard.press('ArrowRight');
+      await page.waitForTimeout(350);
+      const stays = await page.evaluate(() => document.getElementById('app').dataset.qi);
+      check(`${viewport.name}: the right arrow does nothing without an answer`, stays === '6', stays);
+      await page.goBack();
+      await waitStep(page, 'q', 5);
+      await page.evaluate(() => { const next = document.querySelector('.next'); next.click(); next.click(); next.click(); });
+      await page.waitForTimeout(400);
+      const once = await page.evaluate(() => ({ qi: document.getElementById('app').dataset.qi, depth: window.history.state && window.history.state.depth }));
+      check(`${viewport.name}: three quick taps on Next move one question and one history entry`, once.qi === '6' && once.depth === 7, JSON.stringify(once));
+      await page.goBack();
+      await waitStep(page, 'q', 5);
+      check(`${viewport.name}: the browser back after Next returns to the previous question`, true);
+      await answer(page, [5, 5, 5, 5, 5, 5, 5], 5);
+      await waitStep(page, 'grow');
+      const growFresh = await nextState();
+      check(`${viewport.name}: on question 13 Next is hidden until a card is chosen`, growFresh && growFresh.hidden, JSON.stringify(growFresh));
+      await grow(page, 'P');
+      await page.goBack();
+      await waitStep(page, 'grow');
+      const growShown = await nextState();
+      check(`${viewport.name}: back from the email screen shows Next on question 13`, growShown && !growShown.hidden, JSON.stringify(growShown));
+      await page.goBack();
+      await waitStep(page, 'q', 11);
+      await page.locator('.next').click();
+      await waitStep(page, 'grow');
+      await page.locator('.next').click();
+      await waitStep(page, 'email');
+      const emailBar = await page.evaluate(() => ({ next: document.querySelector('.next') === null, name: document.getElementById('name') !== null }));
+      check(`${viewport.name}: Next from question 12 to 13 and from 13 to the email screen, which has no Next`, emailBar.next && emailBar.name, JSON.stringify(emailBar));
+      await context.close();
+    });
+  }
+
+  await section('next 320', async () => {
+    const { page, context } = await open({ viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true });
+    await start(page);
+    await answer(page, [5, 6]);
+    await back(page);
+    await waitStep(page, 'q', 1);
+    const bar = await page.evaluate(() => {
+      const items = ['.back', '.topbar__count', '.next'].map((s) => document.querySelector(s).getBoundingClientRect());
+      return { centers: items.map((r) => Math.round(r.top + r.height / 2)), heights: items.map((r) => Math.round(r.height)), rights: items.map((r) => Math.round(r.right)), width: document.documentElement.scrollWidth, inner: document.documentElement.clientWidth };
+    });
+    check('320 px: Back, counter and Next stay on one row, no horizontal scroll, Next at least 44 px', Math.max(...bar.centers) - Math.min(...bar.centers) <= 3 && bar.heights[2] >= 44 && bar.rights[2] <= bar.inner && bar.width === bar.inner, JSON.stringify(bar));
+    await context.close();
+  });
+
+  // ---------- texts after the test ----------
+  await section('texts', async () => {
+    const { page, context } = await open();
+    await start(page);
+    await answer(page, [8, 8, 8, 8, 4, 5, 4, 5, 8, 8, 8, 8]);
+    const title = await page.evaluate(() => document.querySelector('h1').textContent);
+    check('question 13 title: "Which area has your priority right now?"', title === 'Which area has your priority right now?', title);
+    await grow(page, 'P');
+    const note = await page.evaluate(() => document.querySelector('.data-note').textContent);
+    check('email screen data note: "... to show your result and send you a copy."', note === 'Mastermind Global B.V. uses your name and email to show your result and send you a copy.', note);
+    await fillEmail(page, PERSON);
+    await submit(page);
+    await waitStep(page, 'result');
+    await page.waitForTimeout(RESULT_SETTLE_MS);
+    const result = await page.evaluate(() => ({ button: document.querySelector('.cta a').textContent, line: document.querySelector('.grow-note').textContent }));
+    check('result: "Book an introduction call" and the priority line', result.button === 'Book an introduction call' && result.line === 'Your priority right now is your Professional Fulfilment, and your answers agree. Here is where to start.', JSON.stringify(result));
+    await context.close();
+    const mismatch = renderEmail(content, { name: 'Anna', email: 'a@b.co', src: '', grow: 'V' }, evaluate([4, 3, 5, 4, 7, 6, 8, 7, 6, 5, 7, 6], content));
+    const match = renderEmail(content, { name: 'Anna', email: 'a@b.co', src: '', grow: 'P' }, evaluate([8, 8, 8, 8, 4, 5, 4, 5, 8, 8, 8, 8], content));
+    check('emails: the new button text and both priority lines', mismatch.html.includes('Book an introduction call') && mismatch.text.includes('Your priority right now is your Visibility. Your answers suggest starting with your Foundation. Here is why.') && match.text.includes('Your priority right now is your Professional Fulfilment, and your answers agree. Here is where to start.'));
+  });
+
+  // ---------- empty first-screen fields ----------
+  await section('first screen fields', async () => {
+    const { page, context } = await open();
+    const intro = await page.evaluate(() => ({
+      audience: document.querySelector('.intro__audience') === null,
+      instruction: document.querySelector('.intro__instruction') === null,
+      headChildren: document.querySelector('.intro__head').children.length,
+      actionChildren: document.querySelector('.intro__actions').children.length,
+      linkButtons: document.querySelectorAll('.screen--intro .link-button').length,
+      startBottom: Math.round(document.querySelector('.btn--primary').getBoundingClientRect().bottom),
+    }));
+    check('empty audience and instruction render nothing: two head children, two action children, no link', intro.audience && intro.instruction && intro.headChildren === 2 && intro.actionChildren === 2 && intro.linkButtons === 0, JSON.stringify(intro));
+    await context.close();
+    // Temporary texts of the budget length (see budget.txt of stage 4) at the five sizes
+    // from the task; they exist only here and in scripts/shots-fixes.mjs.
+    const filledDist = await mkdtemp(path.join(os.tmpdir(), 'mosaic-filled-'));
+    const filled = await startServer(0, filledDist);
+    try {
+      await build({ distDir: filledDist, endpointUrl: DEAD_ENDPOINT, backend: false, quiet: true, patch: (c) => { c.intro.audience = placeholder(90); c.intro.instruction = placeholder(55); } });
+      const sizes = [
+        { name: '390x664', viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, startVisible: true },
+        { name: '390x844', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, startVisible: true },
+        { name: '320x568', viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true },
+        { name: '834x1194', viewport: { width: 834, height: 1194 }, isMobile: true, hasTouch: true, startVisible: true },
+        { name: '1440x900', viewport: { width: 1440, height: 900 }, startVisible: true, wide: true },
+      ];
+      for (const size of sizes) {
+        const { name, startVisible, wide, ...options } = size;
+        const ctx = await browser.newContext(options);
+        const p = await ctx.newPage();
+        await p.goto(`${filled.url}/`, { waitUntil: 'networkidle' });
+        await p.evaluate(() => document.fonts.ready);
+        const placed = await p.evaluate(() => {
+          const rect = (selector) => document.querySelector(selector).getBoundingClientRect();
+          const audience = rect('.intro__audience');
+          const instruction = rect('.intro__instruction');
+          const lead = rect('.lead');
+          const teaser = rect('.teaser');
+          const start = rect('.btn--primary');
+          const meta = rect('.meta-line');
+          return {
+            audienceBelowLead: audience.top >= lead.bottom && audience.bottom <= meta.top && (window.innerWidth >= 900 || audience.bottom <= teaser.top),
+            instructionAboveStart: instruction.bottom <= start.top && instruction.top >= meta.bottom,
+            audienceWidth: Math.round(audience.width),
+            startBottom: Math.round(start.bottom),
+            inner: window.innerHeight,
+            noHorizontalScroll: document.documentElement.scrollWidth === document.documentElement.clientWidth,
+          };
+        });
+        const ok = placed.audienceBelowLead && placed.instructionAboveStart && placed.noHorizontalScroll
+          && (!startVisible || placed.startBottom <= placed.inner)
+          && (!wide || placed.audienceWidth <= 576);
+        check(`${name}: filled audience under the subhead, instruction right above Start, no horizontal scroll${startVisible ? ', Start visible' : ''}${wide ? ', texts within the left column' : ''}`, ok, JSON.stringify(placed));
+        await ctx.close();
+      }
+    } finally {
+      filled.server.close();
+      await rm(filledDist, { recursive: true, force: true });
+    }
+  });
+
   // ---------- tablet portrait keeps the phone design ----------
   await section('tablet', async () => {
     const { page, context } = await open({ viewport: { width: 834, height: 1194 }, isMobile: true, hasTouch: true });
@@ -865,8 +1064,7 @@ try {
       await page.close();
       await clear();
       page = await sendContext.newPage();
-      await page.goto(`${capture.url}/`, { waitUntil: 'networkidle' });
-      await page.getByRole('button', { name: labels.sample, exact: true }).click();
+      await page.goto(`${capture.url}/?sample`, { waitUntil: 'networkidle' });
       await waitStep(page, 'result');
       await page.waitForTimeout(800);
       seen = await posts();

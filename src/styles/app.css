@@ -197,6 +197,19 @@ a {
   color: var(--text-muted);
 }
 
+/* Two optional texts from the content file; rendered only when filled in. */
+.intro__audience {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--navy);
+}
+
+.intro__instruction {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .author-line strong {
   font-weight: 600;
   color: var(--navy);
@@ -242,32 +255,50 @@ a {
 
 /* ---------- question screens ---------- */
 
+/* Three fixed cells: Back, the counter, Next. Next may be hidden; nothing moves. */
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
 }
 
-.back {
+.back,
+.next {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: var(--touch-min);
-  padding: 12px 12px 12px 0;
   border: 0;
   background: none;
   font-size: 14px;
   color: var(--navy);
 }
 
-.back svg {
+.back {
+  justify-self: start;
+  padding: 12px 12px 12px 0;
+}
+
+.next {
+  justify-self: end;
+  padding: 12px 0 12px 12px;
+}
+
+.next[hidden] {
+  display: none;
+}
+
+.back svg,
+.next svg {
   width: 16px;
   height: 16px;
   flex: none;
 }
 
 .topbar__count {
+  justify-self: center;
   font-size: 13px;
+  text-align: center;
   color: var(--text-muted);
 }
 
@@ -953,6 +984,11 @@ a {
 
   .screen--intro .author-line {
     max-width: 48ch;
+  }
+
+  .intro__audience,
+  .intro__instruction {
+    max-width: 576px;
   }
 
   /* questions 1 to 12 */

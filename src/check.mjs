@@ -31,9 +31,10 @@ const SHAPE = {
     meta_line: 'string',
     start_label: 'string',
     author_line: 'string',
-    sample_label: 'string',
+    audience: 'text-or-empty',
+    instruction: 'text-or-empty',
   },
-  question: { prompt: 'string', back_label: 'string', scale: 'scale' },
+  question: { prompt: 'string', back_label: 'string', next_label: 'string', scale: 'scale' },
   pillars: 'pillars',
   grow_question: { eyebrow: 'string', title: 'string', subtitle: 'string', options: 'options' },
   email_step: {
@@ -91,8 +92,9 @@ const PLACEHOLDERS = [
   ['email.notify_subject', ['{name}', '{result}']],
 ];
 
-// The only value that may be empty: no backend yet means nothing is sent.
-const EMPTY_ALLOWED = new Set(['backend.endpoint_url']);
+// Values that may be empty: no backend means nothing is sent; the two optional
+// first-screen texts are simply not shown while empty.
+const EMPTY_ALLOWED = new Set(['backend.endpoint_url', 'intro.audience', 'intro.instruction']);
 
 const isString = (value) => typeof value === 'string';
 const isFilled = (value) => isString(value) && value.trim() !== '';
@@ -155,6 +157,9 @@ function checkKind(value, kind, at, fail) {
   switch (kind) {
     case 'string':
       if (!isFilled(value)) fail(at, 'must be a non-empty text');
+      break;
+    case 'text-or-empty':
+      if (!isString(value)) fail(at, 'must be text (empty is allowed)');
       break;
     case 'url':
       if (!isWebUrl(value)) fail(at, 'must be a full address starting with https:// or http://');

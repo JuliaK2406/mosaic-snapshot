@@ -18,7 +18,8 @@
     "compare": "node scripts/compare-shots.mjs",
     "backend": "node scripts/backend.mjs",
     "emails": "node scripts/emails.mjs",
-    "shots:data": "node scripts/shots-data.mjs"
+    "shots:data": "node scripts/shots-data.mjs",
+    "shots:fixes": "node scripts/shots-fixes.mjs"
   },
   "dependencies": {
     "js-yaml": "^5.4.1"

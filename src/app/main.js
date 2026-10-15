@@ -39,6 +39,8 @@ let unwinding = null;    // callback waiting for history.go() to land on the fir
 let backLock = null;     // ignores a second Back tap until the first one has landed
 let questionRefs = null; // live nodes of the mounted question screen
 let growButtons = null;   // cards of the mounted question 13, for the keyboard
+let growNext = null;      // the Next button of question 13
+let nextLock = null;      // set by a Next tap until the next screen has been painted
 let submitting = false;  // a result is being prepared; further submits are ignored
 
 // ---------- history ----------
@@ -106,6 +108,34 @@ function lockedBack() {
   window.history.back();
 }
 
+// Forward without changing the answer: to the next question, to question 13, or from
+// question 13 to the email screen. Only when the current step already has an answer,
+// never during the 250 ms highlight, never while a Back is still landing, and not again
+// before the next screen has been painted: a doubled event moves one step, a second
+// real tap on the painted screen moves one more.
+function canGoNext() {
+  if (transition || backLock || nextLock) return false;
+  if (state.step === 'q') return Number.isInteger(state.answers[state.qi]);
+  if (state.step === 'grow') return Boolean(state.grow);
+  return false;
+}
+
+function goNext() {
+  if (!canGoNext()) return;
+  nextLock = true;
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      nextLock = null;
+    });
+  });
+  if (state.step === 'grow') {
+    go('email');
+    return;
+  }
+  if (state.qi < questions.length - 1) go('q', { qi: state.qi + 1 });
+  else go('grow');
+}
+
 function showIntro() {
   state.step = 'intro';
   state.depth = 0;
@@ -166,6 +196,11 @@ window.addEventListener('keydown', (event) => {
     goBack();
     return;
   }
+  if (key === 'ArrowRight') {
+    event.preventDefault();
+    goNext();
+    return;
+  }
   if (!/^[0-9]$/.test(key)) return;
   event.preventDefault();
   if (state.step === 'q') {
@@ -187,6 +222,7 @@ function render() {
   } else {
     questionRefs = null;
     growButtons = null;
+    growNext = null;
     root.replaceChildren(SCREENS[state.step]());
     if (state.step === 'result') fitResultColumn();
   }
@@ -215,13 +251,34 @@ function backIcon() {
   return icon;
 }
 
-function topBar({ step, showProgress }) {
+function nextIcon() {
+  const icon = svg('svg', { viewBox: '0 0 16 16', width: 16, height: 16, 'aria-hidden': 'true', focusable: 'false' });
+  icon.append(svg('path', {
+    d: 'M3 8h10M9 4l4 4-4 4',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': 1.6,
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+  }));
+  return icon;
+}
+
+// Back on the left, the counter in the middle, Next on the right. Next starts hidden
+// (not shown, not focusable, not read out) and takes no space either way: the three
+// cells of the bar are fixed, so showing or hiding it moves nothing.
+function topBar({ step, showProgress, next }) {
   const bar = el('div', { class: 'topbar' }, [
     el('button', { type: 'button', class: 'back', onclick: goBack }, [backIcon(), content.question.back_label]),
   ]);
-  if (!showProgress) return { bar, count: null, fill: null, progress: null };
+  const nextButton = next ? el('button', { type: 'button', class: 'next', hidden: true, onclick: goNext }, [content.question.next_label, nextIcon()]) : null;
+  if (!showProgress) {
+    if (nextButton) bar.append(el('span', { class: 'topbar__count' }), nextButton);
+    return { bar, count: null, fill: null, progress: null, next: nextButton };
+  }
   const count = el('span', { class: 'topbar__count', id: 'progress-count' });
   bar.append(count);
+  if (nextButton) bar.append(nextButton);
   const fill = el('div', { class: 'progress__fill' });
   const progress = el('div', {
     class: 'progress',
@@ -230,7 +287,7 @@ function topBar({ step, showProgress }) {
     'aria-valuemin': '0',
     'aria-valuemax': String(TOTAL_STEPS),
   }, [fill]);
-  const refs = { bar, count, fill, progress };
+  const refs = { bar, count, fill, progress, next: nextButton };
   setProgress(refs, step);
   return refs;
 }
@@ -250,15 +307,14 @@ function introScreen() {
     el('div', { class: 'intro__head' }, [
       el('h1', { class: 'display', tabindex: '-1', 'data-focus-target': '', text: content.intro.headline }),
       el('p', { class: 'lead', text: content.intro.subhead }),
+      content.intro.audience ? el('p', { class: 'intro__audience', text: content.intro.audience }) : null,
     ]),
     renderTeaser(),
     el('p', { class: 'meta-line', text: content.intro.meta_line }),
     el('div', { class: 'intro__actions' }, [
+      content.intro.instruction ? el('p', { class: 'intro__instruction', text: content.intro.instruction }) : null,
       el('button', { type: 'button', class: 'btn btn--primary', text: content.intro.start_label, onclick: start }),
       authorLine(),
-      content.meta.published
-        ? null
-        : el('button', { type: 'button', class: 'link-button', text: content.intro.sample_label, onclick: showSample }),
     ]),
   ]);
   append(screen, [main, el('div', { class: 'screen__aside' }, [renderTeaser({ large: true })])]);
@@ -290,7 +346,7 @@ function start() {
 function questionScreen() {
   const screen = el('section', { class: 'screen screen--question' });
   const refs = {
-    ...topBar({ step: state.qi + 1, showProgress: true }),
+    ...topBar({ step: state.qi + 1, showProgress: true, next: true }),
     pillar: el('span', { class: 'eyebrow eyebrow--pillar' }),
     title: el('h1', { class: 'heading', id: 'question-title', tabindex: '-1', 'data-focus-target': '' }),
     note: el('p', { class: 'note' }),
@@ -339,25 +395,27 @@ function updateQuestion() {
     button.classList.toggle('is-selected', selected);
     button.setAttribute('aria-pressed', selected ? 'true' : 'false');
   });
+  refs.next.hidden = !(Number.isInteger(current) && !transition);
   if (refs.liveTiles) updateLiveMosaic(refs.liveTiles, state.answers, state.qi);
 }
 
 function pick(value) {
   if (transition) return;
   state.answers[state.qi] = value;
-  updateQuestion();
+  // The timer starts before the screen updates, so Next stays hidden during the highlight.
   transition = setTimeout(() => {
     transition = null;
     if (state.qi < questions.length - 1) go('q', { qi: state.qi + 1 });
     else go('grow');
   }, TRANSITION_MS);
+  updateQuestion();
 }
 
 // ---------- screen 13: which area to grow ----------
 
 function growScreen() {
   const screen = el('section', { class: 'screen screen--question screen--grow' });
-  const progress = topBar({ step: TOTAL_STEPS, showProgress: true });
+  const progress = topBar({ step: TOTAL_STEPS, showProgress: true, next: true });
   const q = content.grow_question;
   const buttons = [];
   for (const option of q.options) {
@@ -368,8 +426,9 @@ function growScreen() {
     button.addEventListener('click', () => pickGrow(option.key, buttons));
     buttons.push({ key: option.key, button });
   }
-  markGrow(buttons);
   growButtons = buttons;
+  growNext = progress.next;
+  markGrow(buttons);
   append(screen, [
     el('div', { class: 'screen__main' }, [
       progress.bar,
@@ -391,16 +450,17 @@ function markGrow(buttons) {
     button.classList.toggle('is-selected', selected);
     button.setAttribute('aria-pressed', selected ? 'true' : 'false');
   }
+  if (growNext) growNext.hidden = !(state.grow && !transition);
 }
 
 function pickGrow(key, buttons) {
   if (transition) return;
   state.grow = key;
-  markGrow(buttons);
   transition = setTimeout(() => {
     transition = null;
     go('email');
   }, TRANSITION_MS);
+  markGrow(buttons);
 }
 
 // ---------- screen 14: name and email ----------
@@ -452,7 +512,7 @@ function emailScreen() {
   });
   append(screen, [
     el('div', { class: 'screen__main' }, [
-      topBar({ step: TOTAL_STEPS, showProgress: false }).bar,
+      topBar({ step: TOTAL_STEPS, showProgress: false, next: false }).bar,
       el('div', { class: 'email__head' }, [
         el('div', { class: 'email__text' }, [
           el('span', { class: 'eyebrow', text: t.eyebrow }),
@@ -640,10 +700,15 @@ window.addEventListener('resize', () => {
 // ---------- start ----------
 
 if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual';
+// The sample result opens from the address with ?sample, only while the page is unpublished.
+// There is no link to it on the page: it is a check for the team, not for the people taking the test.
+const sampleRequested = !content.meta.published && new URLSearchParams(window.location.search).has('sample');
 // After a reload in the middle of the questions the old entries are still in history:
 // show the first screen, then walk back to where that run began, so Back behaves normally.
 const previousEntry = window.history.state;
 showIntro();
-if (previousEntry && Number.isInteger(previousEntry.depth) && previousEntry.depth > 0) {
+if (sampleRequested) {
+  showSample();
+} else if (previousEntry && Number.isInteger(previousEntry.depth) && previousEntry.depth > 0) {
   window.history.go(-previousEntry.depth);
 }
