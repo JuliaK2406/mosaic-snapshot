@@ -613,6 +613,7 @@ test('summary: the sections and the sorted table are where the layout says', () 
   assert.equal(sortFormula, '=SORT($H$30:$K$41,3,TRUE)');
   const query = layout.formulas.find((f) => f.row === ROWS.sourceFirst && f.column === 1).formula;
   assert.ok(query.startsWith('=IFERROR(QUERY({') && query.includes("where Col1 <> 'test'") && query.includes('order by count(Col1) desc'));
+  assert.ok(query.includes("label count(Col1) '', sum(Col2) ''"), 'empty labels, so QUERY prints no header row of its own');
   assert.equal(layout.formulas.filter((f) => f.column === 4 && f.row >= ROWS.sourceFirst).length, 30);
   assert.ok(layout.formats.some((f) => f.format === '0%') && layout.formats.some((f) => f.format === '0.00') && layout.formats.some((f) => f.format === 'yyyy-mm-dd hh:mm'));
   assert.deepEqual(layout.hiddenColumns, { start: 8, count: 4 });

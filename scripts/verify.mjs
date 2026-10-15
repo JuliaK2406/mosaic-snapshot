@@ -579,28 +579,27 @@ try {
       await page.keyboard.press('2');
       await waitStep(page, 'email');
       check(`${width}: key 2 on question 13 chooses a card and opens the email screen`, true);
-      const expectedAnswers = [5, 6, 7, 4, 8, 9, 5, 5, 5, 5, 5, 5];
-      const blur = await page.evaluate(() => {
-        const big = document.querySelector('.mosaic-blur--large');
+      const veiled = await page.evaluate(() => {
+        const grid = document.querySelector('.screen--email .screen__aside .mosaic--veiled');
         const small = document.querySelector('.mosaic-blur--compact');
+        const tiles = grid ? [...grid.querySelectorAll('.mosaic__tile')] : [];
         return {
-          bigDisplay: getComputedStyle(big).display,
-          smallDisplay: getComputedStyle(small).display,
-          filter: getComputedStyle(big.querySelector('.mosaic__tiles')).filter,
-          hidden: big.getAttribute('aria-hidden'),
-          tiles: [...big.querySelectorAll('.mosaic__tile')].map((t) => getComputedStyle(t).backgroundColor),
-          scores: document.querySelectorAll('.mosaic-blur .mosaic__score, .mosaic-blur .mosaic__flag').length,
-          width: Math.round(big.getBoundingClientRect().width),
+          display: grid ? getComputedStyle(grid).display : 'missing',
+          smallDisplay: small ? getComputedStyle(small).display : 'missing',
+          hidden: grid && grid.getAttribute('aria-hidden'),
+          tiles: tiles.length,
+          settled: tiles.filter((t) => t.classList.contains('is-answered') && t.classList.contains('is-settled') && !t.classList.contains('is-current')).length,
+          colours: new Set(tiles.map((t) => getComputedStyle(t).backgroundColor)).size,
+          blur: grid ? [...grid.querySelectorAll('.mosaic__tiles')].map((list) => getComputedStyle(list).filter) : [],
+          sharpLabels: grid ? [...grid.querySelectorAll('.mosaic__meta')].every((meta) => !meta.closest('.mosaic__tiles') && getComputedStyle(meta).filter === 'none') : false,
+          names: grid ? [...grid.querySelectorAll('.mosaic__name')].map((n) => n.textContent) : [],
+          scores: document.querySelectorAll('.screen__aside .mosaic__score, .screen__aside .mosaic__flag').length,
+          clipped: grid ? [...grid.querySelectorAll('.mosaic__col')].some((c) => getComputedStyle(c).overflow === 'hidden') : true,
+          width: grid ? Math.round(grid.getBoundingClientRect().width) : 0,
         };
       });
-      const shadesOk = blur.tiles.length === 12 && blur.tiles.every((bg, i) => {
-        const m = bg.match(/rgba?\(94, 26, 77(?:, ([\d.]+))?\)/);
-        if (!m) return false;
-        const a = m[1] === undefined ? 1 : Number(m[1]);
-        return Math.abs(a - (0.12 + (0.88 * (expectedAnswers[i] - 1)) / 9)) < 0.01;
-      });
-      check(`${width}: email screen shows the large blurred mosaic with the real shades, aria-hidden, no scores or labels`,
-        blur.bigDisplay !== 'none' && blur.smallDisplay === 'none' && /blur\(/.test(blur.filter) && blur.hidden === 'true' && shadesOk && blur.scores === 0 && blur.width >= 300, JSON.stringify(blur).slice(0, 300));
+      check(`${width}: email screen shows the live mosaic of the questions: twelve settled tiles of one tone under a light blur, labels sharp, aria-hidden, no scores`,
+        veiled.display !== 'none' && veiled.smallDisplay === 'none' && veiled.hidden === 'true' && veiled.tiles === 12 && veiled.settled === 12 && veiled.colours === 1 && veiled.blur.length === 3 && veiled.blur.every((f) => /blur\(/.test(f)) && veiled.sharpLabels && veiled.names.length === 3 && veiled.scores === 0 && !veiled.clipped && veiled.width >= 200, JSON.stringify(veiled).slice(0, 400));
       await page.getByLabel(labels.name, { exact: true }).click();
       await page.keyboard.type('123');
       await page.keyboard.press('Backspace');
@@ -702,70 +701,67 @@ try {
     });
   }
 
-  await section('blur strength and line length', async () => {
-    let { page, context } = await open({ viewport: { width: 1440, height: 900 } });
-    await start(page);
-    await answer(page, [1, 10, 1, 10, 10, 1, 10, 1, 1, 10, 1, 10]);
-    await grow(page, 'F');
-    await context.close();
-    for (const [w, h] of [[1440, 900], [960, 800]]) {
+  await section('email mosaic and line length', async () => {
+    // Wide email screen: the live mosaic of the questions, same geometry tile by tile, every
+    // tile in the answered tone, a light blur on the tiles only. Uniform and contrasting
+    // answers must look the same: no real shade is in the markup.
+    const tones = {};
+    for (const [w, h] of [[1440, 900], [1366, 768], [960, 800]]) {
       for (const [label, answers] of [['uniform', new Array(12).fill(8)], ['contrasting', [1, 10, 1, 10, 10, 1, 10, 1, 1, 10, 1, 10]]]) {
         const ctx = await browser.newContext({ viewport: { width: w, height: h } });
         const p = await ctx.newPage();
         await p.goto(`${url}/`, { waitUntil: 'networkidle' });
         await start(p);
         await answer(p, answers);
+        await waitStep(p, 'grow');
+        await back(p);
+        await waitStep(p, 'q', 11);
+        await p.waitForTimeout(350);
+        const measure = (selector) => p.evaluate((sel) => {
+          const grid = document.querySelector(sel);
+          const r = grid.getBoundingClientRect();
+          const tiles = [...grid.querySelectorAll('.mosaic__tile')];
+          return {
+            box: [r.left, r.top, r.width, r.height].map(Math.round),
+            tiles: tiles.map((t) => { const b = t.getBoundingClientRect(); return [b.left, b.top, b.width, b.height].map(Math.round); }),
+            colours: [...new Set(tiles.map((t) => getComputedStyle(t).backgroundColor))],
+            answeredTone: (grid.querySelector('.mosaic__tile.is-answered') && getComputedStyle(grid.querySelector('.mosaic__tile.is-answered')).backgroundColor) || null,
+            blur: [...grid.querySelectorAll('.mosaic__tiles')].map((list) => parseFloat((getComputedStyle(list).filter.match(/blur\(([\d.]+)px\)/) || [])[1]) || 0),
+            clipped: [...grid.querySelectorAll('.mosaic__col')].some((c) => getComputedStyle(c).overflow === 'hidden'),
+            labelFilters: [...grid.querySelectorAll('.mosaic__meta')].map((m) => getComputedStyle(m).filter),
+            names: [...grid.querySelectorAll('.mosaic__name')].map((n) => n.textContent),
+            scrolls: document.documentElement.scrollHeight > window.innerHeight,
+          };
+        }, selector);
+        const onQuestion = await measure('.screen--question .screen__aside .mosaic--live');
+        await p.locator('.next').click();
         await grow(p, 'F');
-        await p.waitForTimeout(300);
-        const structure = await p.evaluate(() => {
-          const big = document.querySelector('.mosaic-blur--large');
-          const cols = [...big.querySelectorAll('.mosaic__col')];
-          const tiles = [...big.querySelectorAll('.mosaic__tile')];
-          const meanTile = tiles.reduce((sum, t) => sum + t.getBoundingClientRect().height, 0) / tiles.length;
-          const inner = parseFloat((getComputedStyle(cols[0].querySelector('.mosaic__tiles')).filter.match(/blur\(([\d.]+)px\)/) || [])[1]) || 0;
-          const rects = cols.map((c) => { const r = c.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; });
-          const box = big.getBoundingClientRect();
-          return { cols: cols.length, clipped: cols.every((c) => getComputedStyle(c).overflow === 'hidden'), inner, meanTile, rects, box: { x: box.left, y: box.top, w: box.width, h: box.height } };
-        });
-        check(`${w}: blurred mosaic (${label}) is clipped per column with an inner blur of at least 0.4 of a tile height`,
-          structure.cols === 3 && structure.clipped && structure.inner >= 0.4 * structure.meanTile, JSON.stringify({ inner: structure.inner, meanTile: Math.round(structure.meanTile), clipped: structure.clipped }));
-        const shot = (await p.screenshot({ clip: { x: structure.box.x, y: structure.box.y, width: structure.box.w, height: structure.box.h } })).toString('base64');
-        const measured = await p.evaluate(async ([src, rects, box]) => {
-          const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = reject; i.src = `data:image/png;base64,${src}`; });
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx2 = canvas.getContext('2d');
-          ctx2.drawImage(img, 0, 0);
-          const data = ctx2.getImageData(0, 0, img.width, img.height).data;
-          const scale = img.width / box.w;
-          // "purple" = how far a pixel is from porcelain towards aubergine, 0 to 1
-          const purple = (x, y) => { const i = (Math.round(y) * img.width + Math.round(x)) * 4; return 1 - (data[i + 1] - 26) / (248 - 26); };
-          const yFrom = Math.round(box.h * 0.2 * scale);
-          const yTo = Math.round(box.h * 0.8 * scale);
-          const columnMean = (x) => { let s = 0; let n = 0; for (let y = yFrom; y < yTo; y += 2) { s += purple(x, y); n += 1; } return s / n; };
-          const columnSpread = (x) => { const values = []; for (let y = yFrom; y < yTo; y += 2) values.push(purple(x, y)); return Math.max(...values) - Math.min(...values); };
-          const centers = rects.map((r) => ((r.left + r.right) / 2 - box.x) * scale);
-          const gaps = [((rects[0].right + rects[1].left) / 2 - box.x) * scale, ((rects[1].right + rects[2].left) / 2 - box.x) * scale];
-          return { centers: centers.map(columnMean), gaps: gaps.map(columnMean), spreads: centers.map(columnSpread) };
-        }, [shot, structure.rects, structure.box]);
-        const minCenter = Math.min(...measured.centers);
-        const maxGap = Math.max(...measured.gaps);
-        const maxSpread = Math.max(...measured.spreads);
-        check(`${w}: blurred mosaic (${label}): three columns read as separate bands, no single tile readable`,
-          maxGap < 0.5 * minCenter && maxSpread < 0.6 * minCenter,
-          JSON.stringify({ centers: measured.centers.map((v) => v.toFixed(2)), gaps: measured.gaps.map((v) => v.toFixed(2)), spreads: measured.spreads.map((v) => v.toFixed(2)) }));
+        await p.waitForTimeout(350);
+        const onEmail = await measure('.screen--email .screen__aside .mosaic--veiled');
+        check(`${w}: email mosaic (${label}): all twelve tiles have one and the same colour, the answered tone of the questions`,
+          onEmail.tiles.length === 12 && onEmail.colours.length === 1 && onEmail.colours[0] === onQuestion.answeredTone,
+          JSON.stringify({ colours: onEmail.colours, tone: onQuestion.answeredTone }));
+        const meanTile = onEmail.tiles.reduce((s, t) => s + t[3], 0) / onEmail.tiles.length;
+        check(`${w}: email mosaic (${label}): light blur on the tiles only (2 to 8 px, under a fifth of a tile), no clipping, labels sharp`,
+          onEmail.blur.length === 3 && onEmail.blur.every((b) => b >= 2 && b <= 8 && b < meanTile / 5) && !onEmail.clipped && onEmail.labelFilters.every((f) => f === 'none') && onEmail.names.length === 3 && onEmail.names.join() === onQuestion.names.join(),
+          JSON.stringify({ blur: onEmail.blur, meanTile: Math.round(meanTile), clipped: onEmail.clipped, labelFilters: onEmail.labelFilters, names: onEmail.names }));
+        // The vertical place is compared only when neither screen scrolls (short windows scroll).
+        const vertical = !onQuestion.scrolls && !onEmail.scrolls;
+        const same = (a, b) => a.every((v, i) => (i === 1 && !vertical) || Math.abs(v - b[i]) <= 1);
+        check(`${w}: email mosaic (${label}): same size and place as on question 12, tile by tile${vertical ? '' : ' (horizontal only, the page scrolls)'}`,
+          same(onEmail.box, onQuestion.box) && onEmail.tiles.every((t, i) => same(t, onQuestion.tiles[i])),
+          JSON.stringify({ question: onQuestion.box, email: onEmail.box, scrolls: [onQuestion.scrolls, onEmail.scrolls] }));
+        tones[`${w}-${label}`] = onEmail.colours[0];
         await ctx.close();
       }
     }
-    const context2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    const page2 = await context2.newPage();
-    await page2.goto(`${url}/`, { waitUntil: 'networkidle' });
-    await start(page2);
-    await answer(page2, [1, 10, 1, 10, 10, 1, 10, 1, 1, 10, 1, 10]);
-    await grow(page2, 'F');
-    page = page2;
-    context = context2;
+    check('uniform and contrasting answers give the same email mosaic colour at every size', new Set(Object.values(tones)).size === 1, JSON.stringify(tones));
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    await page.goto(`${url}/`, { waitUntil: 'networkidle' });
+    await start(page);
+    await answer(page, [1, 10, 1, 10, 10, 1, 10, 1, 1, 10, 1, 10]);
+    await grow(page, 'F');
     const lead = await page.evaluate(() => {
       const l = document.querySelector('.lead');
       return l ? { width: l.getBoundingClientRect().width, size: parseFloat(getComputedStyle(l).fontSize) } : null;

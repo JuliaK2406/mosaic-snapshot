@@ -739,10 +739,10 @@ a {
 }
 
 /* ======================================================================
-   Stage 2: wrappers, the blurred mosaic on the email screen, the live mosaic
-   and the wide layout from 900 px. Below 900 px every screen except email
-   renders exactly as before: the wrappers are display: contents and the
-   asides are hidden.
+   Stage 2: wrappers, the small blurred mosaic on the phone email screen, the live
+   mosaic (beside the questions, and veiled on the wide email screen) and the wide
+   layout from 900 px. Below 900 px every screen except email renders exactly as
+   before: the wrappers are display: contents and the asides are hidden.
    ====================================================================== */
 
 .screen__main,
@@ -756,7 +756,7 @@ a {
   display: none;
 }
 
-/* ---------- email screen: title with the blurred mosaic beside it ---------- */
+/* ---------- email screen: title with the small blurred mosaic beside it (phone) ---------- */
 
 .email__head {
   display: grid;
@@ -778,16 +778,13 @@ a {
   grid-column: 1 / -1;
 }
 
-/* Blur radius about half a tile width: tiles melt into their column, columns stay visible. */
+/* Phone only. Blur radius about half a tile width: tiles melt into their column, columns
+   stay visible. */
 .mosaic-blur {
   --mosaic-scale: 0.42;
   width: 96px;
   filter: blur(12px);
   pointer-events: none;
-}
-
-.mosaic-blur--large {
-  display: none;
 }
 
 /* Twice the usual column gap: under a strong blur the rows of tiles melt together
@@ -859,6 +856,13 @@ a {
   animation: none;
 }
 
+/* Email screen on wide screens: the same live mosaic, every tile settled in the answered
+   tone, the tiles under a light blur like frosted glass. Only the tiles are blurred, the
+   column labels stay sharp; nothing is clipped, so the edges are soft. */
+.mosaic--veiled .mosaic__tiles {
+  filter: blur(4px);
+}
+
 @keyframes live-fill {
   from {
     opacity: 0.3;
@@ -907,8 +911,9 @@ a {
     align-content: center;
   }
 
-  /* ten digits of 48 px with 10 px gaps need 572 px on the left */
-  .screen--question:not(.screen--email) {
+  /* ten digits of 48 px with 10 px gaps need 572 px on the left; the email screen keeps
+     the same columns so its mosaic sits exactly where it was beside the questions */
+  .screen--question {
     grid-template-columns: minmax(572px, 7fr) minmax(0, 5fr);
   }
 
@@ -1056,24 +1061,6 @@ a {
     display: none;
   }
 
-  /* Wide screens: each column is blurred inside its own clip, so the three columns stay
-     apart as soft bands while the tiles inside melt together. */
-  .mosaic-blur--large {
-    --mosaic-scale: 1.7;
-    display: block;
-    width: min(100%, 420px);
-    filter: none;
-  }
-
-  .mosaic-blur--large .mosaic__col {
-    overflow: hidden;
-    border-radius: calc(var(--radius-lg) * 1.5);
-  }
-
-  .mosaic-blur--large .mosaic__tiles {
-    filter: blur(64px); /* about 0.7 of a tile height: no single tile survives, even with 1 and 10 side by side */
-  }
-
   .form {
     max-width: 440px;
   }
@@ -1173,7 +1160,7 @@ a {
 /* Narrow laptops, 900 to 1023 px: smaller digits and gaps so the live mosaic keeps room
    for its labels (ten digits of 44 px with 8 px gaps need 512 px). */
 @media (min-width: 900px) and (max-width: 1023px) {
-  .screen--question:not(.screen--email) {
+  .screen--question {
     grid-template-columns: minmax(512px, 7fr) minmax(0, 5fr);
     column-gap: 48px;
   }

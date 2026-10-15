@@ -169,7 +169,7 @@ export function summaryLayout({ pillars, items, lastColumn }) {
   ['Source', 'Responses', 'Subscribed', 'Subscribed share'].forEach((header, i) => value(ROWS.sourceHeader, i + 1, header));
   bold.push({ row: ROWS.sourceHeader, column: 1, rows: 1, columns: SUMMARY_COLUMNS });
   formula(ROWS.sourceFirst, 1,
-    `=IFERROR(QUERY({${col('Source')},ARRAYFORMULA(IF(${col('Newsletter consent')}="Yes",1,0))},"select Col1, count(Col1), sum(Col2) where Col1 <> 'test' and Col1 <> '' group by Col1 order by count(Col1) desc",0),"-")`);
+    `=IFERROR(QUERY({${col('Source')},ARRAYFORMULA(IF(${col('Newsletter consent')}="Yes",1,0))},"select Col1, count(Col1), sum(Col2) where Col1 <> 'test' and Col1 <> '' group by Col1 order by count(Col1) desc label count(Col1) '', sum(Col2) ''",0),"-")`);
   for (let i = 0; i < SOURCE_ROWS; i += 1) {
     const row = ROWS.sourceFirst + i;
     formula(row, 4, `=IF(OR(B${row}="",NOT(ISNUMBER(B${row}))),"",IF(B${row}=0,0,C${row}/B${row}))`, PERCENT);

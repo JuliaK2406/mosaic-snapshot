@@ -518,23 +518,35 @@ function emailScreen() {
           el('span', { class: 'eyebrow', text: t.eyebrow }),
           el('h1', { class: 'heading', tabindex: '-1', 'data-focus-target': '', text: t.title }),
         ]),
-        blurredMosaic('compact'),
+        blurredMosaic(),
         el('p', { class: 'note', text: t.subtitle }),
       ]),
       form,
     ]),
-    el('div', { class: 'screen__aside' }, [blurredMosaic('large')]),
+    el('div', { class: 'screen__aside' }, [veiledMosaic()]),
   ]);
   return screen;
 }
 
-// The person's real mosaic, blurred: the promise before the email, the reveal after it.
-function blurredMosaic(variant) {
+// Phone: the person's real mosaic, small and blurred beside the title, the promise before
+// the email, the reveal after it.
+function blurredMosaic() {
   if (!state.answers.every(Number.isInteger)) return null;
   const evaluation = evaluate(state.answers, content);
-  return el('div', { class: `mosaic-blur mosaic-blur--${variant}`, 'aria-hidden': 'true' }, [
+  return el('div', { class: 'mosaic-blur mosaic-blur--compact', 'aria-hidden': 'true' }, [
     renderMosaic(content, evaluation, { plain: true }),
   ]);
+}
+
+// Wide screens: the same live mosaic as beside the questions, all twelve tiles settled in the
+// flat answered tone, under a light blur like frosted glass (CSS). No real shade is in the
+// markup; those appear only on the result screen.
+function veiledMosaic() {
+  if (!state.answers.every(Number.isInteger)) return null;
+  const live = renderLiveMosaic(content);
+  live.grid.classList.add('mosaic--veiled');
+  updateLiveMosaic(live.tiles, state.answers, -1, { settle: true });
+  return live.grid;
 }
 
 function setError(input, errorNode, message) {
