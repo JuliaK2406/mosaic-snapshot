@@ -170,14 +170,14 @@ a {
 .teaser {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: calc(8px * var(--mosaic-scale, 1));
   margin-top: 4px;
 }
 
 .teaser__col {
   display: flex;
   flex-direction: column;
-  gap: var(--tile-gap);
+  gap: calc(var(--tile-gap) * var(--mosaic-scale, 1));
 }
 
 .teaser__tile {
@@ -197,17 +197,33 @@ a {
   color: var(--text-muted);
 }
 
-/* Two optional texts from the content file; rendered only when filled in. */
-.intro__audience {
+/* "You'll discover:" with its three points, under the mosaic on the phone */
+.discover {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.discover__title {
   font-size: 15px;
-  line-height: 1.55;
+  font-weight: 600;
   color: var(--navy);
 }
 
-.intro__instruction {
-  font-size: 14px;
+.discover__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 15px;
   line-height: 1.5;
-  color: var(--text-muted);
+  color: var(--navy);
+}
+
+.discover__list li::marker {
+  color: var(--aubergine);
 }
 
 .author-line strong {
@@ -324,9 +340,11 @@ a {
   margin-top: 28px;
 }
 
+/* The item's question, right under the title and above the buttons */
 .prompt {
-  margin-top: 12px;
-  font-size: 14px;
+  margin-top: -8px;
+  font-size: 15px;
+  line-height: 1.5;
   color: var(--text-muted);
 }
 
@@ -948,6 +966,7 @@ a {
   }
 
   .note,
+  .prompt,
   .card__desc {
     font-size: 16px;
   }
@@ -991,8 +1010,8 @@ a {
     max-width: 48ch;
   }
 
-  .intro__audience,
-  .intro__instruction {
+  .screen--intro .discover {
+    margin-top: 12px;
     max-width: 576px;
   }
 
@@ -1154,6 +1173,20 @@ a {
 
   .intro__actions {
     margin-top: 10px;
+  }
+}
+
+/* Short phones (Safari with its bars on a 390 px wide phone shows 664 px): the first-screen
+   mosaic shrinks and two gaps close a little so that the Start button stays in view
+   (5 px to spare at 390 x 664). Text sizes do not change. */
+@media (max-width: 599px) and (max-height: 720px) {
+  .teaser:not(.teaser--large) {
+    --mosaic-scale: 0.45;
+    margin-top: 0;
+  }
+
+  .discover {
+    margin-top: 12px;
   }
 }
 

@@ -592,7 +592,7 @@ test('summary: twelve question rows with names from the content, codes without i
   assert.equal(withContent.length, 12);
   assert.deepEqual(withContent[0], { pillarShort: 'Foundation', title: content.pillars[0].items[0].title, code: 'F1' });
   assert.deepEqual(withContent[11], { pillarShort: 'Visibility', title: content.pillars[2].items[3].title, code: 'V4' });
-  const helperTitles = layout.cells.filter((c) => c.column === 9 && c.row >= ROWS.questionsFirst).map((c) => c.value);
+  const helperTitles = layout.cells.filter((c) => c.column === 8 && c.row >= ROWS.questionsFirst).map((c) => c.value);
   assert.deepEqual(helperTitles, withContent.map((item) => item.title));
   const fallback = questionItems(null);
   assert.equal(fallback.length, 12);
@@ -618,6 +618,11 @@ test('summary: the sections and the sorted table are where the layout says', () 
   assert.equal(layout.formulas.filter((f) => f.column === 4 && f.row >= ROWS.sourceFirst).length, 30);
   assert.ok(layout.formats.some((f) => f.format === '0%') && layout.formats.some((f) => f.format === '0.00') && layout.formats.some((f) => f.format === 'yyyy-mm-dd hh:mm'));
   assert.deepEqual(layout.hiddenColumns, { start: 8, count: 4 });
+  assert.deepEqual([1, 2, 3, 4].map((i) => at(ROWS.questionsHeader, i).value), ['Question', 'Pillar', 'Average', 'Answers 1 to 4']);
+  assert.equal(at(ROWS.questionsFirst, 8).value, content.pillars[0].items[0].title, 'H holds the question name');
+  assert.equal(at(ROWS.questionsFirst, 9).value, content.pillars[0].short, 'I holds the pillar');
+  assert.deepEqual(layout.columnWidths, [{ column: 1, width: 340 }, { column: 2, width: 150 }, { column: 3, width: 110 }, { column: 4, width: 150 }]);
+  assert.deepEqual(layout.merges, [{ row: 1, column: 1, rows: 1, columns: 4, wrap: true }], 'the note is merged across A:D with wrapping');
 });
 
 // locale: ',' or ';' decides which probe formula evaluates to 3; 'broken' makes both fail.
@@ -630,11 +635,13 @@ function fakeSpreadsheet(initial = {}, locale = ',') {
     const formats = new Map();
     const weights = new Map();
     const hidden = [];
-    const resized = [];
+    const widths = new Map();
+    const merges = [];
+    const wraps = [];
     let frozen = 0;
     const ensure = (r, c) => { while (grid.length < r) grid.push([]); const row = grid[r - 1]; while (row.length < c) row.push(''); };
     const sheet = {
-      name, grid, formulas, formats, weights, hidden, resized, probes: [], cleared: [],
+      name, grid, formulas, formats, weights, hidden, widths, merges, wraps, probes: [], cleared: [],
       getName: () => name,
       getLastColumn: () => grid.reduce((m, row) => Math.max(m, row.length), 0),
       getLastRow: () => grid.length,
@@ -645,7 +652,7 @@ function fakeSpreadsheet(initial = {}, locale = ',') {
       clear: () => { grid.length = 0; formulas.clear(); formats.clear(); weights.clear(); },
       // hiding or resizing the same columns again changes nothing in a real sheet
       hideColumns: (start, count) => { if (!hidden.some(([s, c]) => s === start && c === count)) hidden.push([start, count]); },
-      autoResizeColumns: (start, count) => { if (!resized.some(([s, c]) => s === start && c === count)) resized.push([start, count]); },
+      setColumnWidth: (column, width) => { widths.set(column, width); },
       getRange: (r, c, nr = 1, nc = 1) => ({
         getValues: () => { ensure(r + nr - 1, c + nc - 1); return grid.slice(r - 1, r - 1 + nr).map((row) => row.slice(c - 1, c - 1 + nc)); },
         setValues: (values) => values.forEach((row, i) => row.forEach((v, j) => { ensure(r + i, c + j); grid[r + i - 1][c + j - 1] = v; })),
@@ -655,6 +662,10 @@ function fakeSpreadsheet(initial = {}, locale = ',') {
         clearContent: () => { ensure(r, c); grid[r - 1][c - 1] = ''; formulas.delete(`${r},${c}`); sheet.cleared.push(`${r},${c}`); },
         setNumberFormat: (fmt) => { for (let i = 0; i < nr; i += 1) for (let j = 0; j < nc; j += 1) formats.set(`${r + i},${c + j}`, fmt); },
         setFontWeight: (w) => { for (let i = 0; i < nr; i += 1) for (let j = 0; j < nc; j += 1) weights.set(`${r + i},${c + j}`, w); },
+        breakApart: () => { const key = `${r},${c},${nr},${nc}`; const i = merges.indexOf(key); if (i >= 0) merges.splice(i, 1); },
+        merge: () => { const key = `${r},${c},${nr},${nc}`; if (!merges.includes(key)) merges.push(key); },
+        setWrap: (on) => { const key = `${r},${c},${nr},${nc}`; if (on && !wraps.includes(key)) wraps.push(key); },
+        setVerticalAlignment: () => {},
       }),
     };
     return sheet;
@@ -673,7 +684,7 @@ function fakeSpreadsheet(initial = {}, locale = ',') {
   Object.entries(initial).forEach(([name, rows]) => { sheets.set(name, makeSheet(name, rows)); order.push(name); });
   return spreadsheet;
 }
-const snapshot = (sheet) => JSON.stringify({ grid: sheet.grid, formulas: [...sheet.formulas], formats: [...sheet.formats], weights: [...sheet.weights], hidden: sheet.hidden, frozen: sheet.getFrozenRows() });
+const snapshot = (sheet) => JSON.stringify({ grid: sheet.grid, formulas: [...sheet.formulas], formats: [...sheet.formats], weights: [...sheet.weights], hidden: sheet.hidden, widths: [...sheet.widths], merges: sheet.merges, wraps: sheet.wraps, frozen: sheet.getFrozenRows() });
 
 test('setup on a fake spreadsheet: renames the old header once, keeps the rows, builds Summary first, repeats without changes', () => {
   const oldHeaders = HEADERS.map((h) => (h === 'Priority' ? 'Wants to grow' : h));
@@ -698,6 +709,9 @@ test('setup on a fake spreadsheet: renames the old header once, keeps the rows, 
   assert.equal(summary.grid[0][0].startsWith('Figures update by themselves'), true);
   assert.ok(summary.formulas.get(`${ROWS.total},2`).includes('MATCH("Result"'));
   assert.deepEqual(summary.hidden, [[8, 4]]);
+  assert.deepEqual([...summary.widths], [[1, 340], [2, 150], [3, 110], [4, 150]], 'fixed column widths, no auto-resize');
+  assert.deepEqual(summary.merges, ['1,1,1,4'], 'A1:D1 merged once');
+  assert.deepEqual(summary.wraps, ['1,1,1,4']);
   const responsesAfterFirst = snapshot(responses);
   const summaryAfterFirst = snapshot(summary);
   const second = runSetup({ spreadsheet, props, loaded: { content, error: '' } });
@@ -807,6 +821,7 @@ test('setup on an empty fake spreadsheet writes the new headers and the fallback
   assert.equal(spreadsheet.getSheetByName('Responses').getFrozenRows(), 1);
   assert.ok(lines[2].includes('question codes F1 to V4') && lines[2].includes('404'), lines[2]);
   const summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
-  assert.equal(summary.grid[ROWS.questionsFirst - 1][8], 'F1');
+  assert.equal(summary.grid[ROWS.questionsFirst - 1][7], 'F1', 'the question name is first in the helper block');
+  assert.equal(summary.grid[ROWS.questionsFirst - 1][8], 'F', 'the pillar is second');
   assert.equal(summary.grid[ROWS.resultFirst - 1][0], 'F');
 });

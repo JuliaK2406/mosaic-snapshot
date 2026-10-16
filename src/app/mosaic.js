@@ -46,8 +46,9 @@ export function renderIcon() {
   return icon;
 }
 
-// The decorative mosaic of the first screen. The large variant (wide screens) scales with
-// --mosaic-scale and assembles tile by tile with the same delays as the result.
+// The decorative mosaic of the first screen. Both variants scale with --mosaic-scale (the
+// phone one shrinks on short screens); the large variant (wide screens) also assembles tile
+// by tile with the same delays as the result.
 export function renderTeaser({ large = false } = {}) {
   const teaser = el('div', { class: large ? 'teaser teaser--large' : 'teaser', 'aria-hidden': 'true' });
   let index = 0;
@@ -55,7 +56,7 @@ export function renderTeaser({ large = false } = {}) {
     const col = el('div', { class: 'teaser__col' });
     scores.forEach((score, row) => {
       const height = TEASER_HEIGHTS[column][row];
-      const node = large ? scaledTile('teaser__tile', height, tileAlpha(score)) : tile('teaser__tile', height, tileAlpha(score));
+      const node = scaledTile('teaser__tile', height, tileAlpha(score));
       if (large) node.style.animationDelay = `${tileDelay(index)}ms`;
       index += 1;
       col.append(node);

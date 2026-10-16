@@ -8,6 +8,10 @@ import { HEADERS } from './sheet.js';
 export const SUMMARY_SHEET_NAME = 'Summary';
 export const SUMMARY_NOTE = 'Figures update by themselves with every new response. Test rows (Source = test) are not counted. After the questions change, run setup() again to refresh the question names.';
 export const SUMMARY_COLUMNS = 4;        // visible columns A to D
+// Fixed widths in pixels: A holds the labels and the question names, B the dates and counts.
+// Auto-resize was tried first and made A as wide as the note in A1, so the note is merged
+// across A:D with wrapping instead.
+export const COLUMN_WIDTHS = [340, 150, 110, 150];
 export const HELPER_FIRST_COLUMN = 8;    // H to K: the unsorted question table that the sorted one reads
 export const QUESTION_ROWS = 12;
 export const SOURCE_ROWS = 30;           // room for 30 distinct sources in the "By source" table
@@ -74,7 +78,8 @@ export const ROWS = {
 };
 
 // pillars: [{ key, short }] from the content (or the keys alone), items: [{ pillarShort, title, code }]
-// in question order, lastColumn: letter of the last column of Responses.
+// in question order, lastColumn: letter of the last column of Responses. The helper block H:K
+// holds question name, pillar, average, share; the visible block sorts it by the average.
 export function summaryLayout({ pillars, items, lastColumn }) {
   const col = makeColumnRef(lastColumn);
   const notTest = `${col('Source')},"<>test"`;
@@ -148,14 +153,14 @@ export function summaryLayout({ pillars, items, lastColumn }) {
   // 5. Average by question, lowest first: the helper block in H to K holds the unsorted
   // rows, the visible block sorts them by the average.
   title(ROWS.questionsTitle, 'Average by question, lowest first');
-  ['Pillar', 'Question', 'Average', 'Answers 1 to 4'].forEach((header, i) => value(ROWS.questionsHeader, i + 1, header));
+  ['Question', 'Pillar', 'Average', 'Answers 1 to 4'].forEach((header, i) => value(ROWS.questionsHeader, i + 1, header));
   bold.push({ row: ROWS.questionsHeader, column: 1, rows: 1, columns: SUMMARY_COLUMNS });
   const h = HELPER_FIRST_COLUMN;
   value(ROWS.questionsHeader, h, 'Helper rows for the sorted table on the left (hidden, do not edit)');
   items.forEach((item, i) => {
     const row = ROWS.questionsFirst + i;
-    value(row, h, item.pillarShort);
-    value(row, h + 1, item.title);
+    value(row, h, item.title);
+    value(row, h + 1, item.pillarShort);
     formula(row, h + 2, `=IFERROR(AVERAGEIFS(${col(item.code)},${notTest}),"-")`, TWO_DECIMALS);
     formula(row, h + 3, `=IF(${total}=0,"-",COUNTIFS(${col(item.code)},"<=4",${notTest})/${total})`, PERCENT);
   });
@@ -181,7 +186,8 @@ export function summaryLayout({ pillars, items, lastColumn }) {
     formats,
     bold,
     hiddenColumns: { start: HELPER_FIRST_COLUMN, count: 4 },
-    autoResize: { start: 1, count: SUMMARY_COLUMNS },
+    columnWidths: COLUMN_WIDTHS.map((width, i) => ({ column: i + 1, width })),
+    merges: [{ row: ROWS.note, column: 1, rows: 1, columns: SUMMARY_COLUMNS, wrap: true }],
     rows: ROWS.sourceFirst + SOURCE_ROWS - 1,
     columns: HELPER_FIRST_COLUMN + 3,
   };

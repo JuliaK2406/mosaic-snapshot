@@ -10,7 +10,7 @@ const content = JSON.parse(document.getElementById('snapshot-content').textConte
 const root = document.getElementById('app');
 
 const questions = content.pillars.flatMap((pillar) => pillar.items.map((item) => ({ pillar, item })));
-const TOTAL_STEPS = questions.length + 1;
+const QUESTION_COUNT = questions.length;   // the counter and the bar count the twelve questions; the priority screen has no number
 const TRANSITION_MS = 250;
 const UNWIND_FALLBACK_MS = 600;
 const BACK_LOCK_MS = 500;
@@ -267,7 +267,8 @@ function nextIcon() {
 // Back on the left, the counter in the middle, Next on the right. Next starts hidden
 // (not shown, not focusable, not read out) and takes no space either way: the three
 // cells of the bar are fixed, so showing or hiding it moves nothing.
-function topBar({ step, showProgress, next }) {
+// count: false gives the full bar without a number (the priority screen), decorative only.
+function topBar({ step, showProgress, next, count = true }) {
   const bar = el('div', { class: 'topbar' }, [
     el('button', { type: 'button', class: 'back', onclick: goBack }, [backIcon(), content.question.back_label]),
   ]);
@@ -276,25 +277,22 @@ function topBar({ step, showProgress, next }) {
     if (nextButton) bar.append(el('span', { class: 'topbar__count' }), nextButton);
     return { bar, count: null, fill: null, progress: null, next: nextButton };
   }
-  const count = el('span', { class: 'topbar__count', id: 'progress-count' });
-  bar.append(count);
+  const countNode = el('span', { class: 'topbar__count', id: 'progress-count' });
+  bar.append(countNode);
   if (nextButton) bar.append(nextButton);
   const fill = el('div', { class: 'progress__fill' });
-  const progress = el('div', {
-    class: 'progress',
-    role: 'progressbar',
-    'aria-labelledby': 'progress-count',
-    'aria-valuemin': '0',
-    'aria-valuemax': String(TOTAL_STEPS),
-  }, [fill]);
-  const refs = { bar, count, fill, progress, next: nextButton };
-  setProgress(refs, step);
+  const progress = count
+    ? el('div', { class: 'progress', role: 'progressbar', 'aria-labelledby': 'progress-count', 'aria-valuemin': '0', 'aria-valuemax': String(QUESTION_COUNT) }, [fill])
+    : el('div', { class: 'progress', 'aria-hidden': 'true' }, [fill]);
+  const refs = { bar, count: countNode, fill, progress, next: nextButton };
+  if (count) setProgress(refs, step);
+  else fill.style.width = '100%';
   return refs;
 }
 
 function setProgress(refs, step) {
-  refs.count.textContent = `${step} / ${TOTAL_STEPS}`;
-  refs.fill.style.width = `${Math.round((step / TOTAL_STEPS) * 100)}%`;
+  refs.count.textContent = `${step} / ${QUESTION_COUNT}`;
+  refs.fill.style.width = `${Math.round((step / QUESTION_COUNT) * 100)}%`;
   refs.progress.setAttribute('aria-valuenow', String(step));
 }
 
@@ -307,12 +305,15 @@ function introScreen() {
     el('div', { class: 'intro__head' }, [
       el('h1', { class: 'display', tabindex: '-1', 'data-focus-target': '', text: content.intro.headline }),
       el('p', { class: 'lead', text: content.intro.subhead }),
-      content.intro.audience ? el('p', { class: 'intro__audience', text: content.intro.audience }) : null,
     ]),
     renderTeaser(),
-    el('p', { class: 'meta-line', text: content.intro.meta_line }),
+    // "You'll discover:" with its points: under the mosaic on the phone, under the subhead on wide screens
+    el('div', { class: 'discover' }, [
+      el('p', { class: 'discover__title', text: content.intro.discover_title }),
+      el('ul', { class: 'discover__list' }, content.intro.discover_items.map((text) => el('li', { text }))),
+    ]),
     el('div', { class: 'intro__actions' }, [
-      content.intro.instruction ? el('p', { class: 'intro__instruction', text: content.intro.instruction }) : null,
+      el('p', { class: 'meta-line', text: content.intro.meta_line }),
       el('button', { type: 'button', class: 'btn btn--primary', text: content.intro.start_label, onclick: start }),
       authorLine(),
     ]),
@@ -349,7 +350,7 @@ function questionScreen() {
     ...topBar({ step: state.qi + 1, showProgress: true, next: true }),
     pillar: el('span', { class: 'eyebrow eyebrow--pillar' }),
     title: el('h1', { class: 'heading', id: 'question-title', tabindex: '-1', 'data-focus-target': '' }),
-    note: el('p', { class: 'note' }),
+    prompt: el('p', { class: 'prompt', id: 'question-prompt' }),   // the item's question, under the title and above the buttons
     buttons: [],
   };
   const rates = el('div', { class: 'rates', role: 'group', 'aria-labelledby': 'question-title question-prompt' });
@@ -369,8 +370,8 @@ function questionScreen() {
     el('div', { class: 'screen__main' }, [
       refs.bar,
       refs.progress,
-      el('div', { class: 'question__head' }, [refs.pillar, refs.title, refs.note]),
-      el('p', { class: 'prompt', id: 'question-prompt', text: content.question.prompt }),
+      el('div', { class: 'question__head' }, [refs.pillar, refs.title]),
+      refs.prompt,
       rates,
       scale,
     ]),
@@ -387,8 +388,7 @@ function updateQuestion() {
   setProgress(refs, state.qi + 1);
   refs.pillar.textContent = pillar.name;
   refs.title.textContent = item.title;
-  refs.note.textContent = item.note || '';
-  refs.note.hidden = !item.note;
+  refs.prompt.textContent = item.note;
   const current = state.answers[state.qi];
   refs.buttons.forEach((button, index) => {
     const selected = current === index + 1;
@@ -415,7 +415,7 @@ function pick(value) {
 
 function growScreen() {
   const screen = el('section', { class: 'screen screen--question screen--grow' });
-  const progress = topBar({ step: TOTAL_STEPS, showProgress: true, next: true });
+  const progress = topBar({ step: QUESTION_COUNT, showProgress: true, next: true, count: false });
   const q = content.grow_question;
   const buttons = [];
   for (const option of q.options) {
@@ -512,7 +512,7 @@ function emailScreen() {
   });
   append(screen, [
     el('div', { class: 'screen__main' }, [
-      topBar({ step: TOTAL_STEPS, showProgress: false, next: false }).bar,
+      topBar({ step: QUESTION_COUNT, showProgress: false, next: false }).bar,
       el('div', { class: 'email__head' }, [
         el('div', { class: 'email__text' }, [
           el('span', { class: 'eyebrow', text: t.eyebrow }),

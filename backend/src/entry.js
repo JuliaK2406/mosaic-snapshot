@@ -321,7 +321,14 @@ export function runSetup({ spreadsheet, props, loaded, flush = () => {} }) {
   layout.formats.forEach((format) => summary.getRange(format.row, format.column, format.rows, format.columns).setNumberFormat(format.format));
   layout.bold.forEach((range) => summary.getRange(range.row, range.column, range.rows, range.columns).setFontWeight('bold'));
   summary.hideColumns(layout.hiddenColumns.start, layout.hiddenColumns.count);
-  summary.autoResizeColumns(layout.autoResize.start, layout.autoResize.count);
+  layout.columnWidths.forEach((item) => summary.setColumnWidth(item.column, item.width));
+  layout.merges.forEach((area) => {
+    const range = summary.getRange(area.row, area.column, area.rows, area.columns);
+    range.breakApart();
+    range.merge();
+    range.setWrap(Boolean(area.wrap));
+    range.setVerticalAlignment('top');
+  });
   spreadsheet.setActiveSheet(summary);
   spreadsheet.moveActiveSheet(1);
   const names = content ? 'question names from the content' : `question codes F1 to V4 (content not read${loaded && loaded.error ? `: ${loaded.error}` : ''}); run setup again when CONTENT_URL works`;

@@ -10,8 +10,7 @@ import { chromium } from 'playwright';
 import { loadContent } from '../src/check.mjs';
 import { build } from '../src/build.mjs';
 import { startServer, PREVIEW_BASE } from './serve.mjs';
-import { placeholder } from './shots-fixes.mjs';
-import { start, answer, grow, fillEmail, submit, waitStep, complete, back, labels, PERSON, RESULT_SETTLE_MS } from './shots.mjs';
+import { start, answer, grow, fillEmail, submit, waitStep, complete, back, rate, labels, PERSON, RESULT_SETTLE_MS } from './shots.mjs';
 import { renderEmail } from '../backend/src/email.js';
 import { evaluate } from '../src/app/scoring.js';
 
@@ -178,7 +177,7 @@ try {
       await start(page);
       const selected = await page.evaluate(() => document.querySelectorAll('.rate.is-selected').length);
       const counter = await page.evaluate(() => document.querySelector('.topbar__count').textContent);
-      check(`result ${key}: back gesture returns to the first screen and clears the answers`, selected === 0 && counter === '1 / 13');
+      check(`result ${key}: back gesture returns to the first screen and clears the answers`, selected === 0 && counter === '1 / 12');
       await context.close();
     });
   }
@@ -345,7 +344,7 @@ try {
     check('a second tap during the 250 ms transition is ignored, back shows the first answer selected', kept === 5, `selected ${kept}`);
     const counter = await page.evaluate(() => document.querySelector('.topbar__count').textContent);
     const width = await page.evaluate(() => document.querySelector('.progress__fill').style.width);
-    check('question 1 shows "1 / 13" and an 8% progress bar', counter === '1 / 13' && width === '8%', `${counter} ${width}`);
+    check('question 1 shows "1 / 12" and an 8% progress bar', counter === '1 / 12' && width === '8%', `${counter} ${width}`);
     await answer(page, [5, 6, 7]);
     await page.goBack();
     await waitStep(page, 'q', 2);
@@ -378,11 +377,11 @@ try {
   await section('question screens', async () => {
     const { page, context } = await open();
     await start(page);
-    const q1 = await page.evaluate(() => ({ note: document.querySelector('.note').hidden, title: document.querySelector('#question-title').textContent }));
-    check('question 1 has no note and the right title', q1.note === true && q1.title === content.pillars[0].items[0].title);
+    const q1 = await page.evaluate(() => ({ prompt: document.querySelector('#question-prompt').textContent, title: document.querySelector('#question-title').textContent, note: document.querySelector('.screen--question .note') === null, labelled: document.querySelector('.rates').getAttribute('aria-labelledby'), order: document.querySelector('.question__head + #question-prompt + .rates') !== null }));
+    check('question 1: title and question line from the yaml, no separate note, the line sits between the title and the buttons, which are labelled by both', q1.title === content.pillars[0].items[0].title && q1.prompt === content.pillars[0].items[0].note && q1.note && q1.labelled === 'question-title question-prompt' && q1.order, JSON.stringify(q1));
     await answer(page, [5, 5, 5]);
-    const q4 = await page.evaluate(() => ({ hidden: document.querySelector('.note').hidden, text: document.querySelector('.note').textContent }));
-    check('question 4 shows its note', q4.hidden === false && q4.text === content.pillars[0].items[3].note);
+    const q4 = await page.evaluate(() => ({ title: document.querySelector('#question-title').textContent, prompt: document.querySelector('#question-prompt').textContent }));
+    check('question 4 shows the merged title and its question line', q4.title === content.pillars[0].items[3].title && q4.prompt === content.pillars[0].items[3].note, JSON.stringify(q4));
     const legend = await page.evaluate(() => [...document.querySelectorAll('.scale dt, .scale dd')].map((n) => n.textContent));
     check('scale legend comes from the yaml', JSON.stringify(legend) === JSON.stringify(content.question.scale.flatMap((m) => [String(m.value), m.label])));
     await answer(page, new Array(9).fill(5), 3);
@@ -390,11 +389,13 @@ try {
     const g = await page.evaluate(() => ({
       counter: document.querySelector('.topbar__count').textContent,
       width: document.querySelector('.progress__fill').style.width,
+      decorative: document.querySelector('.progress').getAttribute('aria-hidden'),
+      role: document.querySelector('.progress').getAttribute('role'),
       cards: [...document.querySelectorAll('.card')].map((c) => [c.querySelector('.card__label').textContent, c.querySelector('.card__desc').textContent]),
       pressed: [...document.querySelectorAll('.card')].map((c) => c.getAttribute('aria-pressed')),
     }));
-    check('question 13 shows "13 / 13", full progress and the three cards from the yaml',
-      g.counter === '13 / 13' && g.width === '100%' && JSON.stringify(g.cards) === JSON.stringify(content.grow_question.options.map((o) => [o.label, o.description])) && g.pressed.every((p) => p === 'false'));
+    check('the priority screen shows no number, a full decorative bar and the three cards from the yaml',
+      g.counter === '' && g.width === '100%' && g.decorative === 'true' && g.role === null && JSON.stringify(g.cards) === JSON.stringify(content.grow_question.options.map((o) => [o.label, o.description])) && g.pressed.every((p) => p === 'false'), JSON.stringify(g).slice(0, 200));
     await grow(page, 'V');
     await back(page);
     await waitStep(page, 'grow');
@@ -847,11 +848,11 @@ try {
       await page.locator('.next').click();
       await waitStep(page, 'q', 4);
       const midway = await page.evaluate(() => ({ counter: document.querySelector('.topbar__count').textContent, countLeft: document.querySelector('.topbar__count').getBoundingClientRect().left }));
-      check(`${viewport.name}: Next once shows question 5 with its answer 8`, midway.counter === '5 / 13' && (await selectedRate()) === 8, JSON.stringify(midway));
+      check(`${viewport.name}: Next once shows question 5 with its answer 8`, midway.counter === '5 / 12' && (await selectedRate()) === 8, JSON.stringify(midway));
       await page.locator('.next').click();
       await waitStep(page, 'q', 5);
       const after = await page.evaluate(() => ({ qi: document.getElementById('app').dataset.qi, counter: document.querySelector('.topbar__count').textContent, answered: document.querySelectorAll('.mosaic--live .is-answered').length, countLeft: document.querySelector('.topbar__count').getBoundingClientRect().left }));
-      check(`${viewport.name}: Next twice returns to the farthest question (6) with the five answers intact`, after.qi === '5' && after.counter === '6 / 13' && (await selectedRate()) === 0 && after.answered === 5, JSON.stringify(after));
+      check(`${viewport.name}: Next twice returns to the farthest question (6) with the five answers intact`, after.qi === '5' && after.counter === '6 / 12' && (await selectedRate()) === 0 && after.answered === 5, JSON.stringify(after));
       check(`${viewport.name}: the counter did not move while Next was shown and hidden`, Math.abs(after.countLeft - countBefore) < 1 && Math.abs(midway.countLeft - countBefore) < 1, `${countBefore} vs ${midway.countLeft} vs ${after.countLeft}`);
       const onNew = await nextState();
       check(`${viewport.name}: on the farthest question, which has no answer, Next is hidden`, onNew && onNew.hidden, JSON.stringify(onNew));
@@ -935,64 +936,103 @@ try {
   });
 
   // ---------- empty first-screen fields ----------
-  await section('first screen fields', async () => {
-    const { page, context } = await open();
-    const intro = await page.evaluate(() => ({
-      audience: document.querySelector('.intro__audience') === null,
-      instruction: document.querySelector('.intro__instruction') === null,
-      headChildren: document.querySelector('.intro__head').children.length,
-      actionChildren: document.querySelector('.intro__actions').children.length,
-      linkButtons: document.querySelectorAll('.screen--intro .link-button').length,
-      startBottom: Math.round(document.querySelector('.btn--primary').getBoundingClientRect().bottom),
-    }));
-    check('empty audience and instruction render nothing: two head children, two action children, no link', intro.audience && intro.instruction && intro.headChildren === 2 && intro.actionChildren === 2 && intro.linkButtons === 0, JSON.stringify(intro));
-    await context.close();
-    // Temporary texts of the budget length (see budget.txt of stage 4) at the five sizes
-    // from the task; they exist only here and in scripts/shots-fixes.mjs.
-    const filledDist = await mkdtemp(path.join(os.tmpdir(), 'mosaic-filled-'));
-    const filled = await startServer(0, filledDist);
-    try {
-      await build({ distDir: filledDist, endpointUrl: DEAD_ENDPOINT, backend: false, quiet: true, patch: (c) => { c.intro.audience = placeholder(90); c.intro.instruction = placeholder(55); } });
-      const sizes = [
-        { name: '390x664', viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, startVisible: true },
-        { name: '390x844', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, startVisible: true },
-        { name: '320x568', viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true },
-        { name: '834x1194', viewport: { width: 834, height: 1194 }, isMobile: true, hasTouch: true, startVisible: true },
-        { name: '1440x900', viewport: { width: 1440, height: 900 }, startVisible: true, wide: true },
-      ];
-      for (const size of sizes) {
-        const { name, startVisible, wide, ...options } = size;
-        const ctx = await browser.newContext(options);
-        const p = await ctx.newPage();
-        await p.goto(`${filled.url}/`, { waitUntil: 'networkidle' });
-        await p.evaluate(() => document.fonts.ready);
-        const placed = await p.evaluate(() => {
-          const rect = (selector) => document.querySelector(selector).getBoundingClientRect();
-          const audience = rect('.intro__audience');
-          const instruction = rect('.intro__instruction');
-          const lead = rect('.lead');
-          const teaser = rect('.teaser');
-          const start = rect('.btn--primary');
-          const meta = rect('.meta-line');
-          return {
-            audienceBelowLead: audience.top >= lead.bottom && audience.bottom <= meta.top && (window.innerWidth >= 900 || audience.bottom <= teaser.top),
-            instructionAboveStart: instruction.bottom <= start.top && instruction.top >= meta.bottom,
-            audienceWidth: Math.round(audience.width),
-            startBottom: Math.round(start.bottom),
-            inner: window.innerHeight,
-            noHorizontalScroll: document.documentElement.scrollWidth === document.documentElement.clientWidth,
-          };
-        });
-        const ok = placed.audienceBelowLead && placed.instructionAboveStart && placed.noHorizontalScroll
-          && (!startVisible || placed.startBottom <= placed.inner)
-          && (!wide || placed.audienceWidth <= 576);
-        check(`${name}: filled audience under the subhead, instruction right above Start, no horizontal scroll${startVisible ? ', Start visible' : ''}${wide ? ', texts within the left column' : ''}`, ok, JSON.stringify(placed));
-        await ctx.close();
-      }
-    } finally {
-      filled.server.close();
-      await rm(filledDist, { recursive: true, force: true });
+  await section('first screen', async () => {
+    // Julia's texts of 16 October: the discover block, the question count right above Start.
+    const sizes = [
+      { name: '390x844', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, startVisible: true },
+      { name: '390x664', viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, report: true },
+      { name: '320x568', viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true, report: true },
+      { name: '834x1194', viewport: { width: 834, height: 1194 }, isMobile: true, hasTouch: true, startVisible: true },
+      { name: '1440x900', viewport: { width: 1440, height: 900 }, startVisible: true, wide: true },
+    ];
+    for (const size of sizes) {
+      const { name, startVisible, report, wide, ...options } = size;
+      const ctx = await browser.newContext(options);
+      const p = await ctx.newPage();
+      await p.goto(`${url}/`, { waitUntil: 'networkidle' });
+      await p.evaluate(() => document.fonts.ready);
+      const m = await p.evaluate(() => {
+        const rect = (selector) => document.querySelector(selector).getBoundingClientRect();
+        const lead = rect('.lead');
+        const discover = rect('.discover');
+        const meta = rect('.meta-line');
+        const start = rect('.btn--primary');
+        const teaser = document.querySelector('.teaser:not(.teaser--large)');
+        const teaserRect = teaser.getBoundingClientRect();
+        const teaserVisible = getComputedStyle(teaser).display !== 'none';
+        return {
+          title: document.querySelector('.discover__title').textContent,
+          items: [...document.querySelectorAll('.discover__list li')].map((li) => li.textContent),
+          list: document.querySelector('ul.discover__list') !== null,
+          lead: document.querySelector('.lead').textContent,
+          metaText: document.querySelector('.meta-line').textContent,
+          discoverBelowLead: discover.top >= lead.bottom,
+          discoverBelowTeaser: !teaserVisible || discover.top >= teaserRect.bottom,
+          discoverAboveMeta: discover.bottom <= meta.top,
+          metaInActions: document.querySelector('.intro__actions > .meta-line:first-child') !== null,
+          metaToStart: Math.round(start.top - meta.bottom),
+          startBottom: Math.round(start.bottom),
+          inner: window.innerHeight,
+          scrollY: window.scrollY,
+          noHorizontalScroll: document.documentElement.scrollWidth === document.documentElement.clientWidth,
+          discoverWidth: Math.round(discover.width),
+          teaserVisible,
+          teaserHeight: Math.round(teaserRect.height),
+          noOldFields: document.querySelector('.intro__audience, .intro__instruction') === null,
+        };
+      });
+      const texts = m.title === content.intro.discover_title && JSON.stringify(m.items) === JSON.stringify(content.intro.discover_items) && m.lead === content.intro.subhead && m.metaText === content.intro.meta_line;
+      check(`${name}: the discover list under the subhead${wide ? '' : ' and the mosaic'} with the three points from the yaml, the question count right above Start, no horizontal scroll`,
+        texts && m.list && m.discoverBelowLead && m.discoverBelowTeaser && m.discoverAboveMeta && m.metaInActions && m.metaToStart >= 0 && m.metaToStart <= 24 && m.noHorizontalScroll && m.noOldFields && (!wide || (m.discoverWidth <= 576 && !m.teaserVisible)),
+        JSON.stringify(m).slice(0, 400));
+      if (startVisible) check(`${name}: the Start button is visible without scrolling`, m.scrollY === 0 && m.startBottom <= m.inner, JSON.stringify({ startBottom: m.startBottom, inner: m.inner }));
+      if (report) console.log(`      ${name}: Start bottom at ${m.startBottom} px of ${m.inner} px${m.startBottom <= m.inner ? ', visible without scrolling' : `, ${m.startBottom - m.inner} px short, the page scrolls`}; mosaic ${m.teaserHeight} px tall`);
+      await ctx.close();
     }
+  });
+
+  await section('question texts', async () => {
+    const { page, context } = await open();
+    await start(page);
+    const items = content.pillars.flatMap((pillar) => pillar.items.map((item) => ({ pillar: pillar.name, ...item })));
+    const mismatches = [];
+    for (let qi = 0; qi < items.length; qi += 1) {
+      await waitStep(page, 'q', qi);
+      const shown = await page.evaluate(() => ({
+        pillar: document.querySelector('.eyebrow--pillar').textContent,
+        title: document.querySelector('#question-title').textContent,
+        prompt: document.querySelector('#question-prompt').textContent,
+        counter: document.querySelector('.topbar__count').textContent,
+        width: document.querySelector('.progress__fill').style.width,
+        now: document.querySelector('.progress').getAttribute('aria-valuenow'),
+        max: document.querySelector('.progress').getAttribute('aria-valuemax'),
+        oldPrompt: document.body.textContent.includes('Where are you today?'),
+      }));
+      const expected = { pillar: items[qi].pillar, title: items[qi].title, prompt: items[qi].note, counter: `${qi + 1} / 12`, width: `${Math.round(((qi + 1) / 12) * 100)}%`, now: String(qi + 1), max: '12', oldPrompt: false };
+      for (const key of Object.keys(expected)) if (shown[key] !== expected[key]) mismatches.push(`q${qi + 1} ${key}: ${JSON.stringify(shown[key])} instead of ${JSON.stringify(expected[key])}`);
+      await rate(page, 5);
+    }
+    await waitStep(page, 'grow');
+    check('questions 1 to 12: pillar, title and question line word for word from the yaml, counter n / 12, bar n of 12 and full on the twelfth, no "Where are you today?"', mismatches.length === 0, mismatches.join('; '));
+    await context.close();
+  });
+
+  await section('texts of 16 October', async () => {
+    const { page, context } = await open();
+    const intro = await page.evaluate(() => ({ lead: document.querySelector('.lead').textContent, meta: document.querySelector('.meta-line').textContent, title: document.querySelector('.discover__title').textContent, first: document.querySelector('.discover__list li').textContent }));
+    check('first screen: the new subhead without a full stop, "12 questions · 2 minutes · free", "You\'ll discover:" and the first point',
+      intro.lead === 'A two-minute self-assessment for ambitious women leaders juggling work, personal priorities and their next ambitions' && intro.meta === '12 questions · 2 minutes · free' && intro.title === "You'll discover:" && intro.first === 'Your personal Life Mosaic results across Life Foundation, Professional Path and Visibility', JSON.stringify(intro));
+    await start(page);
+    await answer(page, [5, 5, 5]);
+    const f4 = await page.evaluate(() => ({ title: document.querySelector('#question-title').textContent, prompt: document.querySelector('#question-prompt').textContent }));
+    check('F4: "Time for myself: rest and space, without guilt" with its question', f4.title === 'Time for myself: rest and space, without guilt' && f4.prompt === "Do you have time that's just yours, without feeling you should be doing something else?", JSON.stringify(f4));
+    await answer(page, [5, 5], 3);
+    const p2 = await page.evaluate(() => document.querySelector('#question-title').textContent);
+    check('P2: "Clarity on my next career move (2–3 years)" with the short dash', p2 === 'Clarity on my next career move (2–3 years)', p2);
+    await answer(page, [5, 5, 5, 5], 5);
+    const v2 = await page.evaluate(() => document.querySelector('#question-prompt').textContent);
+    check('V2: the question with a colon before the list, not a long dash', v2 === 'How comfortable are you asking for what you deserve: promotion, pay, resources, credit?', v2);
+    await context.close();
   });
 
   // ---------- tablet portrait keeps the phone design ----------

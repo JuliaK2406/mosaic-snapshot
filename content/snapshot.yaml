@@ -2,7 +2,7 @@
 # Edit the text after the colons. Keep field names and indentation as they are.
 
 meta:
-  published: false   # false = hidden from search engines and the sample link is visible. Set true on launch day
+  published: false   # false = hidden from search engines and the sample result opens via ?sample. Set true on launch day
   site_url: https://mosaic.juliakrylova.com
   title: "Mosaic of Life Snapshot | Julia Krylova"
   description: "A two-minute self-assessment across the three pillars of the Mosaic of Life: your foundation, your professional path and your visibility."
@@ -21,15 +21,17 @@ logic:
 intro:
   wordmark: "MOSAIC OF LIFE SNAPSHOT"
   headline: "Which part of your life needs you first?"
-  subhead: "A two-minute self-assessment across the three pillars of the Mosaic of Life: your foundation, your professional path and your visibility."
-  meta_line: "13 questions · 2 minutes · free"
+  subhead: "A two-minute self-assessment for ambitious women leaders juggling work, personal priorities and their next ambitions"
+  discover_title: "You'll discover:"   # the block under the mosaic (on a laptop under the subhead)
+  discover_items:
+    - "Your personal Life Mosaic results across Life Foundation, Professional Path and Visibility"
+    - "Which area needs your attention most to support your next ambition"
+    - "Three practical first steps you can take to move forward"
+  meta_line: "12 questions · 2 minutes · free"   # right above the Start button
   start_label: "Start"
   author_line: "Created by Julia Krylova, strategic mentor for women leaders, based on her Mosaic of Life Method™."
-  audience: ""   # who the Snapshot is for and why, 1 to 3 sentences. Shown under the subhead; empty = not shown. See the character budget in README
-  instruction: ""   # one sentence on what to rate: how true each statement is for you today. Shown above the Start button; empty = not shown
 
 question:
-  prompt: "Where are you today?"
   back_label: "Back"
   next_label: "Next"
   scale:
@@ -37,6 +39,8 @@ question:
     - { value: 5, label: "OK, but not thriving" }
     - { value: 10, label: "strong, it fuels me" }
 
+# Three pillars with four items each. Every item has a title and a note: the question shown
+# under the title, above the buttons 1 to 10.
 pillars:
   - key: F
     name: "Foundation: Life Resilience"
@@ -44,33 +48,39 @@ pillars:
     in_text: "Foundation"
     items:
       - title: "Energy & recovery"
+        note: "Do you have enough energy for your day, and does rest actually help you recharge?"
       - title: "Emotional resilience under pressure"
+        note: "When pressure builds, how easily do you regain your balance?"
       - title: "My calendar reflects my priorities"
-      - title: "Time for myself"
-        note: "Rest and space, without guilt"
+        note: "Does the way you spend your week match what matters most to you?"
+      - title: "Time for myself: rest and space, without guilt"
+        note: "Do you have time that's just yours, without feeling you should be doing something else?"
   - key: P
     name: "Professional Fulfilment"
     short: "Professional"
     in_text: "Professional Fulfilment"
     items:
       - title: "Satisfaction with my current role"
-      - title: "Clarity on my next career move"
-        note: "In the next 2-3 years"
+        note: "Does your current role make good use of your strengths and keep you engaged?"
+      - title: "Clarity on my next career move (2–3 years)"
+        note: "Do you know where you want to go professionally and what it will take to get there?"
       - title: "Financial independence & security"
+        note: "How secure do you feel about your finances, both now and in the future?"
       - title: "Meaning & impact of my work"
+        note: "Does your work feel meaningful, and can you see the difference you're making?"
   - key: V
     name: "Visibility, Presence, Status"
     short: "Visibility"
     in_text: "Visibility"
     items:
       - title: "Executive presence"
-        note: "I am calm, grounded, warm yet come across as authoritative"
+        note: "How confident and credible do you feel in meetings, presentations and difficult conversations?"
       - title: "Advocating for myself"
-        note: "Asking for promotion, pay, resources, credit"
+        note: "How comfortable are you asking for what you deserve: promotion, pay, resources, credit?"
       - title: "External visibility"
-        note: "I'm comfortable being seen and expressing myself publicly: industry events, panels, LinkedIn"
+        note: "How visible are you beyond your own team or company?"
       - title: "Thought leadership"
-        note: "My ideas shape decisions"
+        note: "Do your ideas influence important conversations and decisions?"
 
 grow_question:   # question 13. Title from Julia (15 Oct); the three option labels are a draft, waiting for her OK
   eyebrow: "YOUR PRIORITY"
