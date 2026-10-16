@@ -939,14 +939,17 @@ try {
   await section('first screen', async () => {
     // Julia's texts of 16 October: the discover block, the question count right above Start.
     const sizes = [
-      { name: '390x844', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, startVisible: true },
-      { name: '390x664', viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, report: true },
+      { name: '390x844', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, startVisible: true, twoLines: true, reference: true },
+      { name: '390x700', viewport: { width: 390, height: 700 }, isMobile: true, hasTouch: true, report: true, twoLines: true },
+      { name: '390x664', viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, report: true, twoLines: true },
+      { name: '375x667', viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true, report: true, twoLines: true },
       { name: '320x568', viewport: { width: 320, height: 568 }, isMobile: true, hasTouch: true, report: true },
       { name: '834x1194', viewport: { width: 834, height: 1194 }, isMobile: true, hasTouch: true, startVisible: true },
       { name: '1440x900', viewport: { width: 1440, height: 900 }, startVisible: true, wide: true },
     ];
+    const full = {};   // the mosaic at full size, measured at 390 x 844
     for (const size of sizes) {
-      const { name, startVisible, report, wide, ...options } = size;
+      const { name, startVisible, report, wide, twoLines, reference, ...options } = size;
       const ctx = await browser.newContext(options);
       const p = await ctx.newPage();
       await p.goto(`${url}/`, { waitUntil: 'networkidle' });
@@ -979,8 +982,21 @@ try {
           teaserVisible,
           teaserHeight: Math.round(teaserRect.height),
           noOldFields: document.querySelector('.intro__audience, .intro__instruction') === null,
+          lines: [...document.querySelectorAll('.discover__list li')].map((li) => Math.round(li.getBoundingClientRect().height / parseFloat(getComputedStyle(li).lineHeight))),
+          fontSize: parseFloat(getComputedStyle(document.querySelector('.discover__list li')).fontSize),
+          column: Math.round(rect('.intro__head').width),
+          teaserWidth: Math.round(teaserRect.width),
+          tileRatio: (() => { const t = teaser.querySelector('.teaser__tile').getBoundingClientRect(); return t.width / t.height; })(),
         };
       });
+      if (reference) full.height = m.teaserHeight;
+      if (twoLines) check(`${name}: every discover point fits in two lines at 14 px or more`, m.lines.every((n) => n <= 2) && m.fontSize >= 14, JSON.stringify({ lines: m.lines, fontSize: m.fontSize }));
+      if (!wide && full.height) {
+        // the same factor for the width and the height: the tiles keep their shape
+        const widthScale = m.teaserWidth / m.column;
+        const heightScale = m.teaserHeight / full.height;
+        check(`${name}: the first-screen mosaic scales as a whole, not below 0.6`, Math.abs(widthScale - heightScale) < 0.03 && widthScale >= 0.59 && widthScale <= 1.01, JSON.stringify({ widthScale: widthScale.toFixed(2), heightScale: heightScale.toFixed(2), teaser: [m.teaserWidth, m.teaserHeight] }));
+      }
       const texts = m.title === content.intro.discover_title && JSON.stringify(m.items) === JSON.stringify(content.intro.discover_items) && m.lead === content.intro.subhead && m.metaText === content.intro.meta_line;
       check(`${name}: the discover list under the subhead${wide ? '' : ' and the mosaic'} with the three points from the yaml, the question count right above Start, no horizontal scroll`,
         texts && m.list && m.discoverBelowLead && m.discoverBelowTeaser && m.discoverAboveMeta && m.metaInActions && m.metaToStart >= 0 && m.metaToStart <= 24 && m.noHorizontalScroll && m.noOldFields && (!wide || (m.discoverWidth <= 576 && !m.teaserVisible)),

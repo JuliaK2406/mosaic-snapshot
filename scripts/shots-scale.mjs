@@ -1,6 +1,6 @@
 // Screenshots for the statements and the agreement scale (PROMPT 04г): questions F2 and V1
 // on two phones, F1 on a laptop, the priority screen and the email screen on a phone, the
-// first screen on a tall and a short phone.
+// first screen on six sizes (tall and short phones, a laptop).
 // Run after npm run build: npm run shots:scale
 // Output: ../screenshots 04г - утверждения и шкала/ (override with SHOTS_DIR).
 
@@ -16,7 +16,9 @@ const OUT_DIR = process.env.SHOTS_DIR || path.resolve(ROOT, '..', 'screenshots 0
 const phone = (width, height) => ({ name: `${width}x${height}`, viewport: { width, height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 const SIZES = {
   tall: phone(390, 844),
+  telegram: phone(390, 700),
   short: phone(390, 664),
+  se: phone(375, 667),
   small: phone(320, 568),
   laptop: { name: '1440x900', viewport: { width: 1440, height: 900 } },
 };
@@ -63,7 +65,7 @@ export async function takeScaleShots(outDir = OUT_DIR) {
   const browser = await chromium.launch();
   const problems = [];
   try {
-    for (const size of [SIZES.tall, SIZES.short]) {
+    for (const size of [SIZES.tall, SIZES.telegram, SIZES.short, SIZES.se, SIZES.small, SIZES.laptop]) {
       problems.push(...await shoot(browser, url, size, '01-intro', async () => {}, outDir));
     }
     for (const size of [SIZES.tall, SIZES.small]) {
