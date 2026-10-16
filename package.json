@@ -21,7 +21,8 @@
     "shots:data": "node scripts/shots-data.mjs",
     "shots:fixes": "node scripts/shots-fixes.mjs",
     "shots:email": "node scripts/shots-email.mjs",
-    "shots:texts": "node scripts/shots-texts.mjs"
+    "shots:texts": "node scripts/shots-texts.mjs",
+    "shots:scale": "node scripts/shots-scale.mjs"
   },
   "dependencies": {
     "js-yaml": "^5.4.1"

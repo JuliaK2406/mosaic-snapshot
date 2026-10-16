@@ -1177,16 +1177,21 @@ a {
 }
 
 /* Short phones (Safari with its bars on a 390 px wide phone shows 664 px): the first-screen
-   mosaic shrinks and two gaps close a little so that the Start button stays in view
-   (5 px to spare at 390 x 664). Text sizes do not change. */
+   mosaic shrinks to a strip and three gaps close a little so that the Start button stays
+   in view (about 10 px to spare at 390 x 664 with the texts of 17 October). Text sizes do
+   not change. */
 @media (max-width: 599px) and (max-height: 720px) {
   .teaser:not(.teaser--large) {
-    --mosaic-scale: 0.45;
+    --mosaic-scale: 0.3;
     margin-top: 0;
   }
 
+  .intro__head {
+    gap: 10px;
+  }
+
   .discover {
-    margin-top: 12px;
+    margin-top: 8px;
   }
 }
 

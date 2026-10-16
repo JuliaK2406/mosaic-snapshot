@@ -1017,21 +1017,46 @@ try {
     await context.close();
   });
 
-  await section('texts of 16 October', async () => {
+  await section('texts of 16 and 17 October', async () => {
     const { page, context } = await open();
-    const intro = await page.evaluate(() => ({ lead: document.querySelector('.lead').textContent, meta: document.querySelector('.meta-line').textContent, title: document.querySelector('.discover__title').textContent, first: document.querySelector('.discover__list li').textContent }));
-    check('first screen: the new subhead without a full stop, "12 questions · 2 minutes · free", "You\'ll discover:" and the first point',
-      intro.lead === 'A two-minute self-assessment for ambitious women leaders juggling work, personal priorities and their next ambitions' && intro.meta === '12 questions · 2 minutes · free' && intro.title === "You'll discover:" && intro.first === 'Your personal Life Mosaic results across Life Foundation, Professional Path and Visibility', JSON.stringify(intro));
+    const intro = await page.evaluate(() => ({ lead: document.querySelector('.lead').textContent, meta: document.querySelector('.meta-line').textContent, title: document.querySelector('.discover__title').textContent, first: document.querySelector('.discover__list li').textContent, path: /Professional [Pp]ath/.test(document.body.innerText) }));
+    check('first screen: the new subhead without a full stop, "12 questions · 2 minutes · free", "You\'ll discover:" and the first point with Professional Fulfilment',
+      intro.lead === 'A two-minute self-assessment for ambitious women leaders juggling work, personal priorities and their next ambitions' && intro.meta === '12 questions · 2 minutes · free' && intro.title === "You'll discover:" && intro.first === 'Your personal Life Mosaic results across Life Foundation, Professional Fulfilment and Visibility' && !intro.path, JSON.stringify(intro));
+    const statements = {
+      F1: 'I have enough energy for my day, and rest actually helps me recharge.',
+      F2: 'When pressure builds, I easily regain my balance.',
+      F3: 'The way I spend my week matches what matters most to me.',
+      F4: "I have time that's just mine, without feeling I should be doing something else.",
+      P1: 'My current role makes good use of my strengths and keeps me engaged.',
+      P2: 'I know where I want to go professionally and what it will take to get there.',
+      P3: 'I feel secure about my finances, both now and in the future.',
+      P4: "My work feels meaningful, and I can see the difference I'm making.",
+      V1: 'I feel confident and credible in meetings, presentations and difficult conversations.',
+      V2: "I'm comfortable asking for what I deserve: promotion, pay, resources, credit.",
+      V3: "I'm visible beyond my own team or company.",
+      V4: 'My ideas influence important conversations and decisions.',
+    };
+    const codes = Object.keys(statements);
+    const inYaml = content.pillars.flatMap((pillar) => pillar.items.map((item) => item.note));
+    check('yaml: the twelve statements word for word, none ends with a question mark', codes.every((code, i) => inYaml[i] === statements[code]) && inYaml.every((note) => !note.trim().endsWith('?')), JSON.stringify(inYaml));
     await start(page);
-    await answer(page, [5, 5, 5]);
-    const f4 = await page.evaluate(() => ({ title: document.querySelector('#question-title').textContent, prompt: document.querySelector('#question-prompt').textContent }));
-    check('F4: "Time for myself: rest and space, without guilt" with its question', f4.title === 'Time for myself: rest and space, without guilt' && f4.prompt === "Do you have time that's just yours, without feeling you should be doing something else?", JSON.stringify(f4));
-    await answer(page, [5, 5], 3);
-    const p2 = await page.evaluate(() => document.querySelector('#question-title').textContent);
-    check('P2: "Clarity on my next career move (2–3 years)" with the short dash', p2 === 'Clarity on my next career move (2–3 years)', p2);
-    await answer(page, [5, 5, 5, 5], 5);
-    const v2 = await page.evaluate(() => document.querySelector('#question-prompt').textContent);
-    check('V2: the question with a colon before the list, not a long dash', v2 === 'How comfortable are you asking for what you deserve: promotion, pay, resources, credit?', v2);
+    const onScreen = [];
+    for (let qi = 0; qi < 12; qi += 1) {
+      await waitStep(page, 'q', qi);
+      onScreen.push(await page.evaluate(() => ({ title: document.querySelector('#question-title').textContent, prompt: document.querySelector('#question-prompt').textContent, legend: [...document.querySelectorAll('.scale dd')].map((n) => n.textContent), old: /Where are you today|a constant struggle|not thriving|fuels me/.test(document.body.textContent) })));
+      await rate(page, 5);
+    }
+    check('questions 1 to 12 on screen: every statement word for word, none a question, the scale reads disagree, partially agree, completely agree, no old labels',
+      onScreen.every((q, i) => q.prompt === statements[codes[i]] && !q.prompt.endsWith('?') && JSON.stringify(q.legend) === JSON.stringify(['disagree', 'partially agree', 'completely agree']) && !q.old), JSON.stringify(onScreen.filter((q, i) => q.prompt !== statements[codes[i]] || q.old)).slice(0, 300));
+    check('F4 and P2 keep their merged titles', onScreen[3].title === 'Time for myself: rest and space, without guilt' && onScreen[5].title === 'Clarity on my next career move (2–3 years)', JSON.stringify([onScreen[3].title, onScreen[5].title]));
+    await waitStep(page, 'grow');
+    // innerText: the visible text only (the embedded content JSON is not on screen)
+    const cards = await page.evaluate(() => ({ labels: [...document.querySelectorAll('.card__label')].map((n) => n.textContent), path: /Professional [Pp]ath/.test(document.body.innerText) }));
+    check('priority screen: the second card says "Professional Fulfilment", "Professional path" is gone', JSON.stringify(cards.labels) === JSON.stringify(['Foundation', 'Professional Fulfilment', 'Visibility']) && !cards.path, JSON.stringify(cards));
+    await grow(page, 'P');
+    const consent = await page.evaluate(() => ({ text: document.querySelector('label.consent span').textContent, checked: document.getElementById('consent').checked, path: /Professional [Pp]ath/.test(document.body.innerText) }));
+    check('email screen: the consent text with "occasional letters", the box unchecked', consent.text === 'Yes, I would like to receive occasional letters from Julia. I can unsubscribe at any time.' && consent.checked === false && !consent.path, JSON.stringify(consent));
+    check('yaml: the consent label and the card label match what the screens show', content.email_step.consent_label === consent.text && content.grow_question.options[1].label === 'Professional Fulfilment');
     await context.close();
   });
 

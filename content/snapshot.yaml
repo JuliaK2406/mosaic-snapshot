@@ -24,7 +24,7 @@ intro:
   subhead: "A two-minute self-assessment for ambitious women leaders juggling work, personal priorities and their next ambitions"
   discover_title: "You'll discover:"   # the block under the mosaic (on a laptop under the subhead)
   discover_items:
-    - "Your personal Life Mosaic results across Life Foundation, Professional Path and Visibility"
+    - "Your personal Life Mosaic results across Life Foundation, Professional Fulfilment and Visibility"
     - "Which area needs your attention most to support your next ambition"
     - "Three practical first steps you can take to move forward"
   meta_line: "12 questions · 2 minutes · free"   # right above the Start button
@@ -35,12 +35,12 @@ question:
   back_label: "Back"
   next_label: "Next"
   scale:
-    - { value: 1, label: "a constant struggle" }
-    - { value: 5, label: "OK, but not thriving" }
-    - { value: 10, label: "strong, it fuels me" }
+    - { value: 1, label: "disagree" }
+    - { value: 5, label: "partially agree" }
+    - { value: 10, label: "completely agree" }
 
-# Three pillars with four items each. Every item has a title and a note: the question shown
-# under the title, above the buttons 1 to 10.
+# Three pillars with four items each. Every item has a title and a note: the statement shown
+# under the title, above the buttons 1 to 10 (1 = disagree, 10 = completely agree).
 pillars:
   - key: F
     name: "Foundation: Life Resilience"
@@ -48,39 +48,39 @@ pillars:
     in_text: "Foundation"
     items:
       - title: "Energy & recovery"
-        note: "Do you have enough energy for your day, and does rest actually help you recharge?"
+        note: "I have enough energy for my day, and rest actually helps me recharge."
       - title: "Emotional resilience under pressure"
-        note: "When pressure builds, how easily do you regain your balance?"
+        note: "When pressure builds, I easily regain my balance."
       - title: "My calendar reflects my priorities"
-        note: "Does the way you spend your week match what matters most to you?"
+        note: "The way I spend my week matches what matters most to me."
       - title: "Time for myself: rest and space, without guilt"
-        note: "Do you have time that's just yours, without feeling you should be doing something else?"
+        note: "I have time that's just mine, without feeling I should be doing something else."
   - key: P
     name: "Professional Fulfilment"
     short: "Professional"
     in_text: "Professional Fulfilment"
     items:
       - title: "Satisfaction with my current role"
-        note: "Does your current role make good use of your strengths and keep you engaged?"
+        note: "My current role makes good use of my strengths and keeps me engaged."
       - title: "Clarity on my next career move (2–3 years)"
-        note: "Do you know where you want to go professionally and what it will take to get there?"
+        note: "I know where I want to go professionally and what it will take to get there."
       - title: "Financial independence & security"
-        note: "How secure do you feel about your finances, both now and in the future?"
+        note: "I feel secure about my finances, both now and in the future."
       - title: "Meaning & impact of my work"
-        note: "Does your work feel meaningful, and can you see the difference you're making?"
+        note: "My work feels meaningful, and I can see the difference I'm making."
   - key: V
     name: "Visibility, Presence, Status"
     short: "Visibility"
     in_text: "Visibility"
     items:
       - title: "Executive presence"
-        note: "How confident and credible do you feel in meetings, presentations and difficult conversations?"
+        note: "I feel confident and credible in meetings, presentations and difficult conversations."
       - title: "Advocating for myself"
-        note: "How comfortable are you asking for what you deserve: promotion, pay, resources, credit?"
+        note: "I'm comfortable asking for what I deserve: promotion, pay, resources, credit."
       - title: "External visibility"
-        note: "How visible are you beyond your own team or company?"
+        note: "I'm visible beyond my own team or company."
       - title: "Thought leadership"
-        note: "Do your ideas influence important conversations and decisions?"
+        note: "My ideas influence important conversations and decisions."
 
 grow_question:   # question 13. Title from Julia (15 Oct); the three option labels are a draft, waiting for her OK
   eyebrow: "YOUR PRIORITY"
@@ -91,7 +91,7 @@ grow_question:   # question 13. Title from Julia (15 Oct); the three option labe
       label: "Foundation"
       description: "Energy, time, resilience and the life around my work"
     - key: P
-      label: "Professional path"
+      label: "Professional Fulfilment"
       description: "My role, my direction and the meaning of my work"
     - key: V
       label: "Visibility"
@@ -103,7 +103,7 @@ email_step:
   subtitle: "Tell me where to send your copy, and see your result right away."
   name_label: "First name"
   email_label: "Email"
-  consent_label: "Yes, I would like to receive letters from Julia. I can unsubscribe at any time."
+  consent_label: "Yes, I would like to receive occasional letters from Julia. I can unsubscribe at any time."
   submit_label: "Show my Mosaic"
   data_note: "Mastermind Global B.V. uses your name and email to show your result and send you a copy."
   error_name: "Please enter your first name."
@@ -117,8 +117,8 @@ result:
   score_suffix: "/ 10"
   legend_low: "Needs attention"
   legend_high: "Strong"
-  grow_match: "Your priority right now is your {grow}, and your answers agree. Here is where to start."   # draft, waiting for Julia's OK
-  grow_mismatch: "Your priority right now is your {grow}. Your answers suggest starting with your {focus}. Here is why."   # draft, waiting for Julia's OK
+  grow_match: "Your priority right now is your {grow}, and your answers agree. Here is where to start."
+  grow_mismatch: "Your priority right now is your {grow}. Your answers suggest starting with your {focus}. Here is why."
   section_labels:
     what_it_means: "What it means"
     how_it_affects: "How it affects the rest of your life mosaic"
