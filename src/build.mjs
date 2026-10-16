@@ -21,6 +21,7 @@ export const BACKEND_SOURCES = [
   'backend/src/validate.js',
   'backend/src/limits.js',
   'backend/src/sheet.js',
+  'backend/src/locale.js',
   'backend/src/summary.js',
   'backend/src/email.js',
   'backend/src/brevo.js',

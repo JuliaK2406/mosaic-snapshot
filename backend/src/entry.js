@@ -8,6 +8,7 @@ import { parseSubmission } from './validate.js';
 import { LIMITS, decideSending, counterKeys, staleCounterKeys } from './limits.js';
 import { SHEET_NAME, HEADERS, AVERAGE_HEADER_NAMES, buildRecord, rowValues, columnOf, missingHeaders, resultLabel, safeCell, headerRenames } from './sheet.js';
 import { SUMMARY_SHEET_NAME, summaryLayout, questionItems, pillarLabels, columnLetter } from './summary.js';
+import { localizeFormula, detectSeparator, probeFormula } from './locale.js';
 import { renderEmail, renderNotification } from './email.js';
 import {
   BREVO_BASE, CONTACT_VARIANTS, brevoTags, emailRequest, notificationRequest, contactRequest,
@@ -274,7 +275,11 @@ function ensureHeaders(sheet) {
 
 // Everything setup() does, with the spreadsheet and the properties passed in, so the tests
 // run it on a fake. Returns the log lines.
-export function runSetup({ spreadsheet, props, loaded }) {
+export const SETUP_ERROR_PREFIX = 'setup: ERROR';
+
+// flush: SpreadsheetApp.flush in Apps Script, so that the probe formula is evaluated before
+// its value is read; the tests pass a no-op.
+export function runSetup({ spreadsheet, props, loaded, flush = () => {} }) {
   const lines = [];
   props.setProperty('SHEET_ID', spreadsheet.getId());
   const responses = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.insertSheet(SHEET_NAME);
@@ -298,13 +303,21 @@ export function runSetup({ spreadsheet, props, loaded }) {
   let summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
   if (!summary) summary = spreadsheet.insertSheet(SUMMARY_SHEET_NAME);
   summary.clear();
+  // The spreadsheet parses setFormula() in its own locale: a probe on the empty sheet tells
+  // whether arguments are separated by "," or ";" before any formula is written.
+  const separator = detectSeparator(summary.getRange(1, 1), flush);
+  if (!separator) {
+    lines.push(`${SETUP_ERROR_PREFIX}: cannot tell the argument separator of this spreadsheet: neither ${probeFormula(',')} nor ${probeFormula(';')} evaluates to 3. The "${SUMMARY_SHEET_NAME}" sheet was not built; check File > Settings > Locale and run setup again.`);
+    return lines;
+  }
+  lines.push(`setup: argument separator "${separator}" (the locale of the spreadsheet)${separator === ';' ? ', formulas translated from the US syntax' : ''}`);
   const grid = [];
   for (let r = 0; r < layout.rows; r += 1) grid.push(new Array(layout.columns).fill(''));
   layout.cells.forEach((cell) => {
     grid[cell.row - 1][cell.column - 1] = cell.value;
   });
   summary.getRange(1, 1, layout.rows, layout.columns).setValues(grid);
-  layout.formulas.forEach((cell) => summary.getRange(cell.row, cell.column).setFormula(cell.formula));
+  layout.formulas.forEach((cell) => summary.getRange(cell.row, cell.column).setFormula(localizeFormula(cell.formula, separator)));
   layout.formats.forEach((format) => summary.getRange(format.row, format.column, format.rows, format.columns).setNumberFormat(format.format));
   layout.bold.forEach((range) => summary.getRange(range.row, range.column, range.rows, range.columns).setFontWeight('bold'));
   summary.hideColumns(layout.hiddenColumns.start, layout.hiddenColumns.count);
@@ -467,8 +480,10 @@ export function setup() {
     console.log('setup: no spreadsheet. Open the script from the sheet (Extensions > Apps Script) or set SHEET_ID.');
     return;
   }
-  const lines = runSetup({ spreadsheet, props, loaded: loadContentFromUrl(config) });
+  const lines = runSetup({ spreadsheet, props, loaded: loadContentFromUrl(config), flush: () => SpreadsheetApp.flush() });
   lines.forEach((line) => console.log(line));
+  const failure = lines.find((line) => line.indexOf(SETUP_ERROR_PREFIX) === 0);
+  if (failure) throw new Error(failure);
 }
 
 function maskKey(value) {

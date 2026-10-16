@@ -11,7 +11,8 @@ import { relayEnabled, describeAccount } from '../backend/src/brevo.js';
 import { LIMITS, decideSending, counterKeys, staleCounterKeys, dayKey, hourKey } from '../backend/src/limits.js';
 import { HEADERS, buildRecord, rowValues, columnOf, missingHeaders, resultLabel, headerRenames } from '../backend/src/sheet.js';
 import { summaryLayout, questionItems, pillarLabels, columnLetter, balanced, ROWS, SUMMARY_SHEET_NAME } from '../backend/src/summary.js';
-import { runSetup } from '../backend/src/entry.js';
+import { runSetup, SETUP_ERROR_PREFIX } from '../backend/src/entry.js';
+import { localizeFormula, detectSeparator, probeFormula, SEPARATORS } from '../backend/src/locale.js';
 import { renderEmail, renderNotification, EMAIL_TILE_HEIGHTS, emailTileAlpha, tileHex, NOTE_BACKGROUND, withParams, escapeHtml } from '../backend/src/email.js';
 import { emailRequest, contactRequest, notificationRequest, isAttributeError, brevoTags, describeLists, describeAttributes } from '../backend/src/brevo.js';
 import { processSubmission, FALLBACK_CONTENT, STATUS, SAMPLE_ANSWERS } from '../backend/src/entry.js';
@@ -619,7 +620,8 @@ test('summary: the sections and the sorted table are where the layout says', () 
   assert.deepEqual(layout.hiddenColumns, { start: 8, count: 4 });
 });
 
-function fakeSpreadsheet(initial = {}) {
+// locale: ',' or ';' decides which probe formula evaluates to 3; 'broken' makes both fail.
+function fakeSpreadsheet(initial = {}, locale = ',') {
   const sheets = new Map();
   let order = [];
   const makeSheet = (name, rows = []) => {
@@ -632,7 +634,7 @@ function fakeSpreadsheet(initial = {}) {
     let frozen = 0;
     const ensure = (r, c) => { while (grid.length < r) grid.push([]); const row = grid[r - 1]; while (row.length < c) row.push(''); };
     const sheet = {
-      name, grid, formulas, formats, weights, hidden, resized,
+      name, grid, formulas, formats, weights, hidden, resized, probes: [], cleared: [],
       getName: () => name,
       getLastColumn: () => grid.reduce((m, row) => Math.max(m, row.length), 0),
       getLastRow: () => grid.length,
@@ -648,7 +650,9 @@ function fakeSpreadsheet(initial = {}) {
         getValues: () => { ensure(r + nr - 1, c + nc - 1); return grid.slice(r - 1, r - 1 + nr).map((row) => row.slice(c - 1, c - 1 + nc)); },
         setValues: (values) => values.forEach((row, i) => row.forEach((v, j) => { ensure(r + i, c + j); grid[r + i - 1][c + j - 1] = v; })),
         setValue: (v) => { ensure(r, c); grid[r - 1][c - 1] = v; },
-        setFormula: (f) => { ensure(r, c); formulas.set(`${r},${c}`, f); grid[r - 1][c - 1] = f; },
+        setFormula: (f) => { ensure(r, c); formulas.set(`${r},${c}`, f); grid[r - 1][c - 1] = f; if (f.startsWith('=SUM(1')) sheet.probes.push(f); },
+        getValue: () => { ensure(r, c); const v = grid[r - 1][c - 1]; if (typeof v === 'string' && v.startsWith('=SUM(1')) return v === probeFormula(locale) ? 3 : '#ERROR!'; return v; },
+        clearContent: () => { ensure(r, c); grid[r - 1][c - 1] = ''; formulas.delete(`${r},${c}`); sheet.cleared.push(`${r},${c}`); },
         setNumberFormat: (fmt) => { for (let i = 0; i < nr; i += 1) for (let j = 0; j < nc; j += 1) formats.set(`${r + i},${c + j}`, fmt); },
         setFontWeight: (w) => { for (let i = 0; i < nr; i += 1) for (let j = 0; j < nc; j += 1) weights.set(`${r + i},${c + j}`, w); },
       }),
@@ -686,7 +690,8 @@ test('setup on a fake spreadsheet: renames the old header once, keeps the rows, 
   assert.deepEqual(responses.grid[1], dataRow);
   assert.equal(props.values.SHEET_ID, 'fake-id');
   assert.ok(first[0].includes('renamed Wants to grow to Priority'), first[0]);
-  assert.ok(first[1].includes('Summary') && first[1].includes('question names from the content'), first[1]);
+  assert.ok(first[1].includes('argument separator ","'), first[1]);
+  assert.ok(first[2].includes('Summary') && first[2].includes('question names from the content'), first[2]);
   assert.equal(spreadsheet.order()[0], SUMMARY_SHEET_NAME);
   const summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
   assert.ok(summary.formulas.size > 60);
@@ -702,13 +707,105 @@ test('setup on a fake spreadsheet: renames the old header once, keeps the rows, 
   assert.equal(spreadsheet.order().filter((n) => n === SUMMARY_SHEET_NAME).length, 1);
 });
 
+// Text in quotes removed, so that separators can be checked outside strings only.
+const outsideStrings = (formula) => formula.replace(/"[^"]*"/g, '""');
+
+test('locale: formulas pass through untouched with a comma, except TRUE and FALSE', () => {
+  assert.equal(localizeFormula('=IF($B$4=0,0,SUM(B1,C1))', ','), '=IF($B$4=0,0,SUM(B1,C1))');
+  assert.equal(localizeFormula('=SORT($H$30:$K$41,3,TRUE)', ','), '=SORT($H$30:$K$41,3,1=1)');
+  assert.equal(localizeFormula('=IF(FALSE,1,TRUEISH)', ','), '=IF(1=0,1,TRUEISH)', 'only whole words');
+  assert.throws(() => localizeFormula('=SUM(1,2)', '|'), /unknown argument separator/);
+  assert.throws(() => localizeFormula('=IF(A1="x,1)', ';'), /unclosed quote/);
+});
+
+test('locale: with a semicolon the arguments, array columns, decimals and booleans change, strings never', () => {
+  assert.equal(localizeFormula('=IF($B$4=0,0,SUM(B1,C1))', ';'), '=IF($B$4=0;0;SUM(B1;C1))', 'nested functions');
+  assert.equal(localizeFormula('={a,b}', ';'), '={a\\b}', 'array columns');
+  assert.equal(localizeFormula('={SUM(a,b),c;d,e}', ';'), '={SUM(a;b)\\c;d\\e}', 'a function inside an array, rows keep the semicolon');
+  assert.equal(localizeFormula('=QUERY(A1:B2,"select Col1, count(Col1) where Col1 <> \'x, y\'",0)', ';'), '=QUERY(A1:B2;"select Col1, count(Col1) where Col1 <> \'x, y\'";0)', 'the QUERY text keeps its commas and single quotes');
+  assert.equal(localizeFormula('=IF(A1>0.5,TRUE,FALSE)', ';'), '=IF(A1>0,5;1=1;1=0)', 'decimal comma, booleans as comparisons');
+  assert.equal(localizeFormula('=COUNTIFS(INDEX(Responses!$A$2:$AB,0,MATCH("Result",Responses!$1:$1,0)),"<>",INDEX(Responses!$A$2:$AB,0,MATCH("Source",Responses!$1:$1,0)),"<>test")', ';'),
+    '=COUNTIFS(INDEX(Responses!$A$2:$AB;0;MATCH("Result";Responses!$1:$1;0));"<>";INDEX(Responses!$A$2:$AB;0;MATCH("Source";Responses!$1:$1;0));"<>test")');
+});
+
+test('locale: the A45 formula and every other Summary formula translate to a balanced semicolon form', () => {
+  const layout = summaryLayout({ pillars: pillarLabels(content), items: questionItems(content), lastColumn: 'AB' });
+  const a45 = layout.formulas.find((f) => f.row === ROWS.sourceFirst && f.column === 1).formula;
+  const expected = '=IFERROR(QUERY({INDEX(Responses!$A$2:$AB;0;MATCH("Source";Responses!$1:$1;0))\\ARRAYFORMULA(IF(INDEX(Responses!$A$2:$AB;0;MATCH("Newsletter consent";Responses!$1:$1;0))="Yes";1;0))};'
+    + '"select Col1, count(Col1), sum(Col2) where Col1 <> \'test\' and Col1 <> \'\' group by Col1 order by count(Col1) desc label count(Col1) \'\', sum(Col2) \'\'";0);"-")';
+  assert.equal(localizeFormula(a45, ';'), expected);
+  for (const cell of layout.formulas) {
+    const translated = localizeFormula(cell.formula, ';');
+    assert.ok(balanced(translated), `balanced: ${translated}`);
+    assert.ok(!outsideStrings(translated).includes(','), `no comma outside strings: ${translated}`);
+    assert.ok(!/\b(TRUE|FALSE)\b/.test(outsideStrings(translated)), `no booleans: ${translated}`);
+    assert.equal(localizeFormula(cell.formula, ','), cell.formula.replace(/\bTRUE\b/g, '1=1').replace(/\bFALSE\b/g, '1=0'), 'the comma form only rewrites booleans');
+  }
+  assert.equal(layout.formulas.filter((f) => /\b(TRUE|FALSE)\b/.test(outsideStrings(f.formula))).length, 1, 'only SORT uses a boolean');
+});
+
+test('locale: the probe tries a comma, then a semicolon, and clears the cell', () => {
+  const makeCell = (locale) => {
+    const cell = { formula: '', value: '', writes: [], cleared: 0, flushes: 0 };
+    cell.setFormula = (f) => { cell.formula = f; cell.writes.push(f); };
+    cell.getValue = () => (cell.formula === probeFormula(locale) ? 3 : '#ERROR!');
+    cell.clearContent = () => { cell.cleared += 1; cell.formula = ''; };
+    return cell;
+  };
+  for (const locale of SEPARATORS) {
+    const cell = makeCell(locale);
+    assert.equal(detectSeparator(cell, () => { cell.flushes += 1; }), locale);
+    assert.equal(cell.cleared, 1);
+    assert.equal(cell.formula, '');
+    assert.ok(cell.flushes >= cell.writes.length + 1, 'a flush after every write and after the clear');
+  }
+  const broken = makeCell('none');
+  assert.equal(detectSeparator(broken, () => {}), null);
+  assert.deepEqual(broken.writes, ['=SUM(1,2)', '=SUM(1;2)']);
+  assert.equal(broken.cleared, 1);
+});
+
+test('setup on a semicolon spreadsheet writes translated formulas, logs the separator and leaves no probe behind', () => {
+  const spreadsheet = fakeSpreadsheet({}, ';');
+  const props = { values: {}, setProperty(key, value) { this.values[key] = value; } };
+  const lines = runSetup({ spreadsheet, props, loaded: { content, error: '' } });
+  assert.ok(lines.some((line) => line.includes('argument separator ";"') && line.includes('translated')), lines.join('\n'));
+  const summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
+  assert.deepEqual(summary.probes, ['=SUM(1,2)', '=SUM(1;2)'], 'both probes were tried, in this order');
+  assert.ok(summary.cleared.includes('1,1'), 'the probe cell was cleared');
+  assert.equal(summary.grid[0][0].startsWith('Figures update by themselves'), true, 'the note is in A1, not the probe');
+  assert.ok(!summary.formulas.has('1,1'));
+  const total = summary.formulas.get(`${ROWS.total},2`);
+  assert.equal(total, '=COUNTIFS(INDEX(Responses!$A$2:$AB;0;MATCH("Result";Responses!$1:$1;0));"<>";INDEX(Responses!$A$2:$AB;0;MATCH("Source";Responses!$1:$1;0));"<>test")');
+  for (const [, formula] of summary.formulas) assert.ok(!outsideStrings(formula).includes(','), formula);
+  assert.equal(summary.formulas.get(`${ROWS.questionsFirst},1`), '=SORT($H$30:$K$41;3;1=1)');
+  const comma = fakeSpreadsheet({}, ',');
+  runSetup({ spreadsheet: comma, props, loaded: { content, error: '' } });
+  const commaSummary = comma.getSheetByName(SUMMARY_SHEET_NAME);
+  assert.deepEqual(commaSummary.probes, ['=SUM(1,2)'], 'a comma sheet needs one probe');
+  assert.ok(commaSummary.formulas.get(`${ROWS.total},2`).includes(',"<>",'));
+  assert.equal(commaSummary.formulas.get(`${ROWS.questionsFirst},1`), '=SORT($H$30:$K$41,3,1=1)');
+});
+
+test('setup stops with a clear error when neither separator works, leaving Responses intact and Summary empty', () => {
+  const spreadsheet = fakeSpreadsheet({ Responses: [HEADERS.slice()] }, 'broken');
+  const props = { values: {}, setProperty(key, value) { this.values[key] = value; } };
+  const lines = runSetup({ spreadsheet, props, loaded: { content, error: '' } });
+  const failure = lines.find((line) => line.startsWith(SETUP_ERROR_PREFIX));
+  assert.ok(failure && failure.includes('=SUM(1,2)') && failure.includes('=SUM(1;2)') && failure.includes('Locale'), lines.join('\n'));
+  const summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
+  assert.equal(summary.formulas.size, 0, 'no formula was written');
+  assert.deepEqual(summary.grid.flat().filter((v) => v !== ''), [], 'the sheet stays empty, the probe is cleared');
+  assert.deepEqual(spreadsheet.getSheetByName('Responses').grid[0], HEADERS);
+});
+
 test('setup on an empty fake spreadsheet writes the new headers and the fallback Summary when content is missing', () => {
   const spreadsheet = fakeSpreadsheet();
   const props = { values: {}, setProperty(key, value) { this.values[key] = value; } };
   const lines = runSetup({ spreadsheet, props, loaded: { content: null, error: 'content.json answered 404' } });
   assert.deepEqual(spreadsheet.getSheetByName('Responses').grid[0], HEADERS);
   assert.equal(spreadsheet.getSheetByName('Responses').getFrozenRows(), 1);
-  assert.ok(lines[1].includes('question codes F1 to V4') && lines[1].includes('404'), lines[1]);
+  assert.ok(lines[2].includes('question codes F1 to V4') && lines[2].includes('404'), lines[2]);
   const summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
   assert.equal(summary.grid[ROWS.questionsFirst - 1][8], 'F1');
   assert.equal(summary.grid[ROWS.resultFirst - 1][0], 'F');

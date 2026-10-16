@@ -1,7 +1,7 @@
 // generated from backend/src, do not edit here
 // Rebuild with "npm run backend" (also part of "npm run build") and paste the whole file
 // into the Apps Script editor, then Deploy > Manage deployments > New version.
-// Sources, in order: src/app/scoring.js, src/app/submit.js, backend/src/validate.js, backend/src/limits.js, backend/src/sheet.js, backend/src/summary.js, backend/src/email.js, backend/src/brevo.js, backend/src/entry.js
+// Sources, in order: src/app/scoring.js, src/app/submit.js, backend/src/validate.js, backend/src/limits.js, backend/src/sheet.js, backend/src/locale.js, backend/src/summary.js, backend/src/email.js, backend/src/brevo.js, backend/src/entry.js
 // ---- src/app/scoring.js ----
 // Result logic as pure functions. No DOM here: the tests import this file directly.
 
@@ -432,6 +432,84 @@ function headerRenames(headerRow) {
   return Object.keys(HEADER_RENAMES)
     .filter((from) => headerRow.indexOf(from) >= 0 && headerRow.indexOf(HEADER_RENAMES[from]) < 0)
     .map((from) => ({ column: headerRow.indexOf(from) + 1, from, to: HEADER_RENAMES[from] }));
+}
+
+// ---- backend/src/locale.js ----
+// Formulas in summary.js are written in the US syntax: a comma between arguments and between
+// the columns of an array, a dot in decimals, TRUE and FALSE. Range.setFormula() parses the
+// text in the locale of the spreadsheet, so in a sheet with a Russian, Dutch or German locale
+// every one of them would be a parse error. setup() probes the separator of the sheet and
+// translates each formula with localizeFormula() before writing it.
+
+const SEPARATORS = [',', ';'];
+
+// Pure. For ';': commas between arguments become ';', commas between array columns become '\',
+// the dot of a decimal number becomes ','. Text inside double or single quotes never changes
+// (the QUERY text keeps its commas). TRUE and FALSE become 1=1 and 1=0 for either separator,
+// so nothing in the formula depends on the language of the sheet.
+function localizeFormula(formula, separator) {
+  if (!SEPARATORS.includes(separator)) throw new Error(`unknown argument separator: ${JSON.stringify(separator)}`);
+  const semicolon = separator === ';';
+  const brackets = [];
+  let out = '';
+  let quote = '';
+  let token = '';
+  const flush = () => {
+    if (!token) return;
+    if (token === 'TRUE') out += '1=1';
+    else if (token === 'FALSE') out += '1=0';
+    else if (semicolon && /^[0-9]+\.[0-9]+$/.test(token)) out += token.replace('.', ',');
+    else out += token;
+    token = '';
+  };
+  for (const char of formula) {
+    if (quote) {
+      out += char;
+      if (char === quote) quote = '';
+      continue;
+    }
+    if (/[A-Za-z0-9_.]/.test(char)) {
+      token += char;
+      continue;
+    }
+    flush();
+    if (char === '"' || char === "'") {
+      quote = char;
+      out += char;
+      continue;
+    }
+    if (char === '(' || char === '{') brackets.push(char);
+    if (char === ')' || char === '}') brackets.pop();
+    if (char === ',' && semicolon) {
+      out += brackets[brackets.length - 1] === '{' ? '\\' : ';';
+      continue;
+    }
+    out += char;
+  }
+  flush();
+  if (quote) throw new Error(`unclosed quote in formula: ${formula}`);
+  return out;
+}
+
+// The probe formulas, one per candidate separator; the one that evaluates to 3 wins.
+function probeFormula(separator) {
+  return `=SUM(1${separator}2)`;
+}
+
+// Runs the probe on a cell: writes each candidate, flushes, reads the value, clears the cell.
+// Returns ',' or ';', or null when neither evaluates to 3.
+function detectSeparator(cell, flush) {
+  let found = null;
+  for (const separator of SEPARATORS) {
+    if (found) break;
+    cell.setFormula(probeFormula(separator));
+    flush();
+    const value = cell.getValue();
+    if (value === 3) found = separator;
+  }
+  cell.clearContent();
+  flush();
+  return found;
 }
 
 // ---- backend/src/summary.js ----
@@ -1060,6 +1138,7 @@ function describeAttributes(json) {
 
 
 
+
 const CONTENT_CACHE_SECONDS = 600;
 const LOCK_WAIT_MS = 20000;
 const CONTENT_CACHE_KEY = 'content.json';
@@ -1320,7 +1399,11 @@ function ensureHeaders(sheet) {
 
 // Everything setup() does, with the spreadsheet and the properties passed in, so the tests
 // run it on a fake. Returns the log lines.
-function runSetup({ spreadsheet, props, loaded }) {
+const SETUP_ERROR_PREFIX = 'setup: ERROR';
+
+// flush: SpreadsheetApp.flush in Apps Script, so that the probe formula is evaluated before
+// its value is read; the tests pass a no-op.
+function runSetup({ spreadsheet, props, loaded, flush = () => {} }) {
   const lines = [];
   props.setProperty('SHEET_ID', spreadsheet.getId());
   const responses = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.insertSheet(SHEET_NAME);
@@ -1344,13 +1427,21 @@ function runSetup({ spreadsheet, props, loaded }) {
   let summary = spreadsheet.getSheetByName(SUMMARY_SHEET_NAME);
   if (!summary) summary = spreadsheet.insertSheet(SUMMARY_SHEET_NAME);
   summary.clear();
+  // The spreadsheet parses setFormula() in its own locale: a probe on the empty sheet tells
+  // whether arguments are separated by "," or ";" before any formula is written.
+  const separator = detectSeparator(summary.getRange(1, 1), flush);
+  if (!separator) {
+    lines.push(`${SETUP_ERROR_PREFIX}: cannot tell the argument separator of this spreadsheet: neither ${probeFormula(',')} nor ${probeFormula(';')} evaluates to 3. The "${SUMMARY_SHEET_NAME}" sheet was not built; check File > Settings > Locale and run setup again.`);
+    return lines;
+  }
+  lines.push(`setup: argument separator "${separator}" (the locale of the spreadsheet)${separator === ';' ? ', formulas translated from the US syntax' : ''}`);
   const grid = [];
   for (let r = 0; r < layout.rows; r += 1) grid.push(new Array(layout.columns).fill(''));
   layout.cells.forEach((cell) => {
     grid[cell.row - 1][cell.column - 1] = cell.value;
   });
   summary.getRange(1, 1, layout.rows, layout.columns).setValues(grid);
-  layout.formulas.forEach((cell) => summary.getRange(cell.row, cell.column).setFormula(cell.formula));
+  layout.formulas.forEach((cell) => summary.getRange(cell.row, cell.column).setFormula(localizeFormula(cell.formula, separator)));
   layout.formats.forEach((format) => summary.getRange(format.row, format.column, format.rows, format.columns).setNumberFormat(format.format));
   layout.bold.forEach((range) => summary.getRange(range.row, range.column, range.rows, range.columns).setFontWeight('bold'));
   summary.hideColumns(layout.hiddenColumns.start, layout.hiddenColumns.count);
@@ -1513,8 +1604,10 @@ function setup() {
     console.log('setup: no spreadsheet. Open the script from the sheet (Extensions > Apps Script) or set SHEET_ID.');
     return;
   }
-  const lines = runSetup({ spreadsheet, props, loaded: loadContentFromUrl(config) });
+  const lines = runSetup({ spreadsheet, props, loaded: loadContentFromUrl(config), flush: () => SpreadsheetApp.flush() });
   lines.forEach((line) => console.log(line));
+  const failure = lines.find((line) => line.indexOf(SETUP_ERROR_PREFIX) === 0);
+  if (failure) throw new Error(failure);
 }
 
 function maskKey(value) {
