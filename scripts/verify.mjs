@@ -931,7 +931,8 @@ try {
     const title = await page.evaluate(() => document.querySelector('h1').textContent);
     check('question 13 title: "Which area has your priority right now?"', title === 'Which area has your priority right now?', title);
     await grow(page, 'P');
-    const note = await page.evaluate(() => document.querySelector('.data-note').textContent);
+    // the data line is the first text node of the paragraph; the privacy link follows it
+    const note = await page.evaluate(() => document.querySelector('.data-note').firstChild.textContent.trim());
     check('email screen data note: "... to show your result and send you a copy."', note === 'Mastermind Global B.V. uses your name and email to show your result and send you a copy.', note);
     await fillEmail(page, PERSON);
     await submit(page);
