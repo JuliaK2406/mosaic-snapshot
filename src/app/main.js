@@ -504,7 +504,7 @@ function emailScreen() {
     el('div', { class: 'field' }, [el('label', { for: 'email', text: t.email_label }), emailInput, emailError]),
     el('label', { class: 'consent', for: 'consent' }, [consent, el('span', { text: t.consent_label })]),
     el('button', { type: 'submit', class: 'btn btn--primary', text: t.submit_label }),
-    el('p', { class: 'data-note', text: t.data_note }),
+    el('p', { class: 'data-note' }, [t.data_note, ' ', privacyLink()]),
   ]);
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -547,6 +547,12 @@ function veiledMosaic() {
   live.grid.classList.add('mosaic--veiled');
   updateLiveMosaic(live.tiles, state.answers, -1, { settle: true });
   return live.grid;
+}
+
+// The data notice opens in a new tab: the answers live only in this page's memory and would
+// be lost if the tab navigated away.
+function privacyLink() {
+  return el('a', { class: 'privacy-link', href: 'privacy/', target: '_blank', rel: 'noopener', text: content.privacy.title });
 }
 
 function setError(input, errorNode, message) {
@@ -653,7 +659,7 @@ function resultScreen() {
     el('div', { class: 'signature' }, [
       el('strong', { text: r.signature_name }),
       el('span', { text: r.signature_title }),
-      el('span', { text: r.legal_line }),
+      el('span', {}, [r.legal_line, ' · ', privacyLink()]),
     ]),
   ]);
 

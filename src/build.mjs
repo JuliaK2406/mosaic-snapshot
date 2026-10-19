@@ -1,8 +1,9 @@
 // Build: content/snapshot.yaml -> check -> dist/ with index.html (content embedded as JSON),
-// app.js, styles.css, favicon.svg, content.json and, while unpublished, robots.txt.
+// privacy/index.html, app.js, styles.css (with the @font-face rules), favicon.svg,
+// content.json, CNAME, the fonts, the link card og-image.png and, while unpublished, robots.txt.
 // Also joins backend/src into backend/Code.gs for Google Apps Script (npm run backend).
 
-import { readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, stat, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
@@ -34,7 +35,39 @@ export const CODE_GS_HEADER = `// generated from backend/src, do not edit here
 // Sources, in order: ${BACKEND_SOURCES.join(', ')}
 `;
 const STYLES = ['tokens.css', 'app.css'];
-const FONTS_URL = 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Lora:wght@500;600&display=swap';
+// The site's own domain: dist/CNAME keeps GitHub Pages on it after every deploy.
+export const CUSTOM_DOMAIN = 'mosaic.juliakrylova.com';
+export const ASSETS = path.join(ROOT, 'assets');
+// The link card for LinkedIn and the like, made by scripts/og-image.mjs (npm run og).
+export const OG_IMAGE_FILE = 'og-image.png';
+export const OG_IMAGE = path.join(ASSETS, OG_IMAGE_FILE);
+export const OG_WIDTH = 1200;
+export const OG_HEIGHT = 627;
+// Fonts are served by the site itself, so no request leaves for Google. These are the latin
+// woff2 files Google Fonts serves for the same weights (variable weight, one file per family),
+// so the rendering is unchanged; the OFL licence files live beside them in assets/fonts.
+export const FONTS = [
+  { family: 'Inter', file: 'inter-latin.woff2', weights: [400, 500, 600] },
+  { family: 'Lora', file: 'lora-latin.woff2', weights: [500, 600] },
+];
+export const FONT_LICENCES = ['OFL-Inter.txt', 'OFL-Lora.txt'];
+const LATIN_RANGE = 'U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD';
+
+// One @font-face per weight, as Google Fonts declares them, all pointing at the same file.
+// The URLs are relative to styles.css, so the notice page in privacy/ resolves them too.
+export function fontFaceCss() {
+  const rules = [];
+  for (const font of FONTS) {
+    for (const weight of font.weights) {
+      rules.push(`@font-face {\n  font-family: '${font.family}';\n  font-style: normal;\n  font-weight: ${weight};\n  font-display: swap;\n  src: url(fonts/${font.file}) format('woff2');\n  unicode-range: ${LATIN_RANGE};\n}`);
+    }
+  }
+  return `/* Fonts served by the site itself (assets/fonts, SIL Open Font License) */\n${rules.join('\n')}\n\n`;
+}
+
+function siteUrl(content) {
+  return content.meta.site_url.replace(/\/$/, '');
+}
 const ROBOTS_TXT = 'User-agent: *\nDisallow: /\n';
 
 export function escapeHtml(text) {
@@ -101,6 +134,7 @@ export function bundle(sources) {
 export function pageHtml(content, { themeColor = '#FAF8F5' } = {}) {
   const m = content.meta;
   const robots = m.published ? '' : '  <meta name="robots" content="noindex, nofollow">\n';
+  const site = escapeHtml(siteUrl(content));
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -108,20 +142,70 @@ export function pageHtml(content, { themeColor = '#FAF8F5' } = {}) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(m.title)}</title>
   <meta name="description" content="${escapeHtml(m.description)}">
-${robots}  <meta property="og:title" content="${escapeHtml(m.title)}">
+${robots}  <link rel="canonical" href="${site}/">
+  <meta property="og:url" content="${site}/">
+  <meta property="og:title" content="${escapeHtml(m.title)}">
   <meta property="og:description" content="${escapeHtml(m.description)}">
   <meta property="og:type" content="website">
+  <meta property="og:image" content="${site}/${OG_IMAGE_FILE}">
+  <meta property="og:image:width" content="${OG_WIDTH}">
+  <meta property="og:image:height" content="${OG_HEIGHT}">
+  <meta property="og:image:alt" content="${escapeHtml(content.intro.headline)}">
+  <meta name="twitter:card" content="summary_large_image">
   <meta name="theme-color" content="${themeColor}">
   <link rel="icon" type="image/svg+xml" href="./favicon.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="${FONTS_URL}">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <main id="app"></main>
   <script id="snapshot-content" type="application/json">${embedJson(content)}</script>
   <script type="module" src="./app.js"></script>
+</body>
+</html>
+`;
+}
+
+// The brand sign as plain markup for the notice page (the survey page draws it in app.js).
+export function brandIconHtml() {
+  return `<span class="brand__icon" aria-hidden="true">${ICON_ALPHAS.map((alpha) => `<span style="background: rgba(var(--aubergine-rgb), ${alpha})"></span>`).join('')}</span>`;
+}
+
+// Email addresses in an already escaped text become mailto links; nothing else is markup.
+export function linkEmails(escapedText) {
+  return escapedText.replace(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g, (email) => `<a href="mailto:${email}">${email}</a>`);
+}
+
+// The data notice at privacy/: its own page from the privacy section of the yaml, the same
+// fonts, colours and gutters as the survey, no script. The brand sign leads back to the survey.
+export function privacyHtml(content, { themeColor = '#FAF8F5' } = {}) {
+  const m = content.meta;
+  const p = content.privacy;
+  const paragraph = (text) => `      <p>${linkEmails(escapeHtml(text))}</p>`;
+  const sections = p.sections.map((section) => {
+    const parts = [`      <h2 class="heading-sm">${escapeHtml(section.heading)}</h2>`];
+    (section.paragraphs || []).forEach((text) => parts.push(paragraph(text)));
+    if (section.items) parts.push(`      <ul class="notice__list">\n${section.items.map((text) => `        <li>${linkEmails(escapeHtml(text))}</li>`).join('\n')}\n      </ul>`);
+    return `    <section class="notice__section">\n${parts.join('\n')}\n    </section>`;
+  }).join('\n');
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(p.title)} | ${escapeHtml(m.title)}</title>
+  <meta name="description" content="${escapeHtml(p.intro)}">
+  <link rel="canonical" href="${escapeHtml(siteUrl(content))}/privacy/">
+  <meta name="theme-color" content="${themeColor}">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <main class="notice">
+    <a class="brand notice__brand" href="../">${brandIconHtml()}<span class="brand__wordmark">${escapeHtml(content.intro.wordmark)}</span></a>
+    <h1 class="heading notice__title">${escapeHtml(p.title)}</h1>
+${paragraph(p.intro)}
+${sections}
+  </main>
 </body>
 </html>
 `;
@@ -183,18 +267,40 @@ export async function build(options = {}) {
 
   const files = {
     'index.html': pageHtml(content, { themeColor: readToken(tokens, '--porcelain') }),
+    'privacy/index.html': privacyHtml(content, { themeColor: readToken(tokens, '--porcelain') }),
     'app.js': bundle(sources),
-    'styles.css': styles.join('\n'),
+    'styles.css': fontFaceCss() + styles.join('\n'),
     'favicon.svg': faviconSvg(readToken(tokens, '--aubergine')),
     'content.json': JSON.stringify(content),
+    'CNAME': `${CUSTOM_DOMAIN}\n`,
   };
   if (!content.meta.published) files['robots.txt'] = ROBOTS_TXT;
 
   // Only the build's own files are replaced; dist/emails (the email previews) stays.
   await mkdir(distDir, { recursive: true });
+  await mkdir(path.join(distDir, 'privacy'), { recursive: true });
+  await mkdir(path.join(distDir, 'fonts'), { recursive: true });
   for (const name of [...Object.keys(files), 'robots.txt']) await rm(path.join(distDir, name), { force: true });
   for (const [name, body] of Object.entries(files)) await writeFile(path.join(distDir, name), body, 'utf8');
-  for (const name of Object.keys(files)) {
+  // the fonts with their licence files and the link card are copied as they are
+  const copies = [
+    ...FONTS.map((font) => [path.join(ASSETS, 'fonts', font.file), path.join('fonts', font.file)]),
+    ...FONT_LICENCES.map((name) => [path.join(ASSETS, 'fonts', name), path.join('fonts', name)]),
+    [OG_IMAGE, OG_IMAGE_FILE],
+  ];
+  const written = Object.keys(files);
+  for (const [from, to] of copies) {
+    if (!(await stat(from).catch(() => null))) {
+      if (from === OG_IMAGE) {
+        log(`  WARNING: ${path.relative(ROOT, from)} is missing, run npm run og; the page links to it`);
+        continue;
+      }
+      throw new Error(`${path.relative(ROOT, from)} is missing`);
+    }
+    await copyFile(from, path.join(distDir, to));
+    written.push(to);
+  }
+  for (const name of written) {
     const { size } = await stat(path.join(distDir, name));
     log(`  ${path.relative(ROOT, path.join(distDir, name))}  ${size} bytes`);
   }

@@ -519,6 +519,17 @@ a {
   color: var(--text-muted);
 }
 
+/* The link to the data notice, inline after the data line and in the result footer. The
+   padding and the negative margin give it a 44 px tap area without moving the text. */
+.privacy-link {
+  display: inline-block;
+  padding: 13px 0;
+  margin: -13px 0;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* ---------- result ---------- */
 
 .result__head {
@@ -1291,5 +1302,71 @@ a {
   .cta {
     display: flex;
     border-radius: var(--radius-lg);
+  }
+}
+
+
+/* ---------- the data notice page (privacy/index.html, no script) ---------- */
+
+.notice {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 28px var(--gutter) 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.notice__brand {
+  text-decoration: none;
+  align-self: flex-start;
+  min-height: var(--touch-min);
+}
+
+.notice__title {
+  margin-top: 12px;
+}
+
+.notice p,
+.notice__list {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--navy);
+}
+
+.notice__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.notice__list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notice__list li::marker {
+  color: var(--aubergine);
+}
+
+.notice a {
+  color: var(--navy);
+  text-underline-offset: 2px;
+}
+
+@media (min-width: 900px) {
+  .notice {
+    padding: 48px 48px 64px;
+    gap: 18px;
+  }
+
+  .notice p,
+  .notice__list {
+    font-size: 17px;
   }
 }

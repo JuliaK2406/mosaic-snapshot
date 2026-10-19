@@ -9,6 +9,21 @@ const hasError = (errors, path) => errors.some((e) => e.startsWith(`${path}:`));
 
 // TODO markers are not asserted here on purpose: while published is false a TODO is only
 // a reminder, and this test must not block the deploy when Julia leaves one in the yaml.
+test('the privacy notice needs a title, an intro and sections with a heading and paragraphs or items', () => {
+  const c = copy();
+  delete c.privacy.sections[1].items;
+  assert.ok(hasError(errorsOf(c), 'privacy.sections[1]'));
+  const d = copy();
+  d.privacy.sections[0].heading = '';
+  assert.ok(hasError(errorsOf(d), 'privacy.sections[0].heading'));
+  const e = copy();
+  e.privacy.sections[2].paragraphs = [''];
+  assert.ok(hasError(errorsOf(e), 'privacy.sections[2].paragraphs[0]'));
+  const f = copy();
+  delete f.privacy;
+  assert.ok(hasError(errorsOf(f), 'privacy'));
+});
+
 test('the real content file passes with no errors', () => {
   const { errors, todos } = checkContent(content);
   assert.deepEqual(errors, []);
@@ -90,6 +105,7 @@ test('tie order must list F, P and V once each; the gap must be a number above 0
 
 test('a TODO is listed, blocks only when published is true', () => {
   const c = copy();
+  c.meta.published = false;
   c.results.F.headline = 'TODO: new headline';
   const result = checkContent(c);
   assert.deepEqual(result.todos, ['results.F.headline']);

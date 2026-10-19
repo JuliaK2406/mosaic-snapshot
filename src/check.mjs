@@ -79,6 +79,7 @@ const SHAPE = {
     why_line: 'string',
     notify_subject: 'string',
   },
+  privacy: { title: 'string', intro: 'string', sections: 'notice-sections' },
 };
 
 // Strings that must keep their placeholders.
@@ -189,6 +190,9 @@ function checkKind(value, kind, at, fail) {
     case 'results':
       checkResults(value, at, fail);
       break;
+    case 'notice-sections':
+      checkNoticeSections(value, at, fail);
+      break;
     default:
       fail(at, `unknown check "${kind}"`);
   }
@@ -290,6 +294,25 @@ function checkResults(value, at, fail) {
       checkTextList(block.steps, `${here}.steps`, fail);
     }
   }
+}
+
+// The data notice: sections with a heading and paragraphs and/or the points of a list.
+function checkNoticeSections(value, at, fail) {
+  if (!Array.isArray(value) || value.length === 0) {
+    fail(at, 'must be a list of sections');
+    return;
+  }
+  value.forEach((section, i) => {
+    const here = `${at}[${i}]`;
+    if (!isObject(section)) {
+      fail(here, 'must have a heading');
+      return;
+    }
+    if (!isFilled(section.heading)) fail(`${here}.heading`, 'must be a non-empty text');
+    if (!('paragraphs' in section) && !('items' in section)) fail(here, 'must have paragraphs or items');
+    if ('paragraphs' in section) checkTextList(section.paragraphs, `${here}.paragraphs`, fail);
+    if ('items' in section) checkTextList(section.items, `${here}.items`, fail);
+  });
 }
 
 function checkTextList(value, at, fail) {

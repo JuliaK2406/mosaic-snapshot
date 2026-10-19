@@ -49,7 +49,10 @@ const verifyDist = await mkdtemp(path.join(os.tmpdir(), 'mosaic-verify-'));
 await build({ distDir: verifyDist, endpointUrl: DEAD_ENDPOINT, backend: false, quiet: true });
 const { server, url } = await startServer(0, verifyDist);
 const browser = await chromium.launch();
-const isOwnRequest = (x) => x.startsWith(url) || x.startsWith(DEAD_ENDPOINT) || /^https:\/\/fonts\.(googleapis|gstatic)\.com\//.test(x);
+const isOwnRequest = (x) => x.startsWith(url) || x.startsWith(DEAD_ENDPOINT);
+// Any request to a Google domain while the page loads or runs: there must be none (the fonts are
+// served by the site; script.google.com is reached only when the form is sent, with the real endpoint).
+const GOOGLE = /^https?:\/\/[^/]*(google|gstatic|googleapis|googleusercontent)\.[^/]*\//;
 
 async function open(options = MOBILE, pathname = '/', before) {
   const context = await browser.newContext(options);
@@ -188,34 +191,41 @@ try {
     const links = await intro.evaluate(() => document.querySelectorAll('.screen--intro .link-button, .screen--intro a').length);
     check('first screen has no link to the sample result', links === 0, String(links));
     await introContext.close();
-    const { page, context, requests } = await open(MOBILE, '/?sample');
-    await waitStep(page, 'result');
-    await page.waitForTimeout(RESULT_SETTLE_MS);
-    const text = norm(await page.evaluate(() => document.getElementById('app').textContent));
-    const expectedLine = content.result.grow_mismatch.replace('{grow}', inText('V')).replace('{focus}', inText('F'));
-    check('sample result: focus F, greeting without a name, mismatch line about Visibility and Foundation',
-      text.includes(norm(content.results.F.headline)) && text.includes(norm(content.result.greeting)) && text.includes(norm(expectedLine)) && !text.includes(norm(content.result.greeting_with_name.replace('{name}', ''))));
-    check('sample result: no copy line without an email', !text.includes('on its way'));
-    const external = requests.filter((x) => !x.startsWith(url) && !/^https:\/\/fonts\./.test(x));
-    check('sample result: nothing is sent anywhere, not even to the endpoint', external.length === 0, external.join(', '));
-    await page.goBack();
-    await waitStep(page, 'intro');
-    check('sample result: back leads to the first screen', true);
-    await context.close();
-    const publishedDist = await mkdtemp(path.join(os.tmpdir(), 'mosaic-published-'));
-    const published = await startServer(0, publishedDist);
+    // the site is published: ?sample does nothing here
+    const { page: live, context: liveContext } = await open(MOBILE, '/?sample');
+    await live.waitForTimeout(600);
+    const state = await live.evaluate(() => ({ step: document.getElementById('app').dataset.step, robots: document.querySelector('meta[name="robots"]') !== null }));
+    check('published build: ?sample does nothing, the first screen stays, no noindex', state.step === 'intro' && !state.robots, JSON.stringify(state));
+    await liveContext.close();
+    // the sample result still works in an unpublished build (for the testers before a launch)
+    const unpublishedDist = await mkdtemp(path.join(os.tmpdir(), 'mosaic-unpublished-'));
+    const unpublished = await startServer(0, unpublishedDist);
     try {
-      await build({ distDir: publishedDist, endpointUrl: DEAD_ENDPOINT, backend: false, quiet: true, patch: (c) => { c.meta.published = true; } });
-      const ctx = await browser.newContext(MOBILE);
-      const p = await ctx.newPage();
-      await p.goto(`${published.url}/?sample`, { waitUntil: 'networkidle' });
-      await p.waitForTimeout(600);
-      const state = await p.evaluate(() => ({ step: document.getElementById('app').dataset.step, robots: document.querySelector('meta[name="robots"]') !== null }));
-      check('published build: ?sample does nothing, the first screen stays', state.step === 'intro' && !state.robots, JSON.stringify(state));
-      await ctx.close();
+      await build({ distDir: unpublishedDist, endpointUrl: DEAD_ENDPOINT, backend: false, quiet: true, patch: (c) => { c.meta.published = false; } });
+      const context = await browser.newContext(MOBILE);
+      const page = await context.newPage();
+      const requests = [];
+      page.on('request', (request) => requests.push(request.url()));
+      await page.goto(`${unpublished.url}/?sample`, { waitUntil: 'networkidle' });
+      await waitStep(page, 'result');
+      await page.waitForTimeout(RESULT_SETTLE_MS);
+      const text = norm(await page.evaluate(() => document.getElementById('app').textContent));
+      const expectedLine = content.result.grow_mismatch.replace('{grow}', inText('V')).replace('{focus}', inText('F'));
+      check('unpublished build, sample result: focus F, greeting without a name, mismatch line about Visibility and Foundation',
+        text.includes(norm(content.results.F.headline)) && text.includes(norm(content.result.greeting)) && text.includes(norm(expectedLine)) && !text.includes(norm(content.result.greeting_with_name.replace('{name}', ''))));
+      check('unpublished build, sample result: no copy line without an email', !text.includes('on its way'));
+      const external = requests.filter((x) => !x.startsWith(unpublished.url));
+      check('unpublished build, sample result: nothing is sent anywhere, not even to the endpoint', external.length === 0, external.join(', '));
+      const robotsMeta = await page.evaluate(() => document.querySelector('meta[name="robots"]') !== null);
+      const robotsTxt = await page.request.get(`${unpublished.url}/robots.txt`);
+      check('unpublished build: noindex and a robots.txt that disallows everything', robotsMeta && robotsTxt.status() === 200 && (await robotsTxt.text()).includes('Disallow: /'));
+      await page.goBack();
+      await waitStep(page, 'intro');
+      check('unpublished build, sample result: back leads to the first screen', true);
+      await context.close();
     } finally {
-      published.server.close();
-      await rm(publishedDist, { recursive: true, force: true });
+      unpublished.server.close();
+      await rm(unpublishedDist, { recursive: true, force: true });
     }
   });
 
@@ -431,12 +441,12 @@ try {
       icon: document.querySelector('link[rel="icon"]').getAttribute('href'),
     }));
     check('head: lang, title, description and og tags from the yaml', head.lang === 'en' && head.title === content.meta.title && head.description === content.meta.description && head.ogTitle === content.meta.title && head.ogDescription === content.meta.description);
-    check('head: noindex while unpublished', head.robots === 'noindex, nofollow');
+    check('head: no noindex, the site is published', head.robots === null, String(head.robots));
     check('favicon is referenced relatively', head.icon === './favicon.svg');
-    const robots = await (await page.request.get(`${url}/robots.txt`)).text();
-    check('robots.txt disallows everything while unpublished', robots.includes('Disallow: /'));
+    const robots = await page.request.get(`${url}/robots.txt`);
+    check('no robots.txt once published (404)', robots.status() === 404, String(robots.status()));
     const cname = await page.request.get(`${url}/CNAME`);
-    check('no CNAME file', cname.status() === 404);
+    check('CNAME holds the custom domain', cname.status() === 200 && (await cname.text()).trim() === 'mosaic.juliakrylova.com');
     await context.close();
 
     const previewContext = await browser.newContext(MOBILE);
@@ -1076,6 +1086,107 @@ try {
     await context.close();
   });
 
+  // ---------- launch: no Google requests, published head, link card, the data notice ----------
+  await section('launch', async () => {
+    const { page, context, requests } = await open();
+    await start(page);
+    await answer(page, [5, 5, 5]);
+    const google = requests.filter((x) => GOOGLE.test(x));
+    check('no request to a Google domain while loading and answering (fonts come from the site)', google.length === 0, google.join(', '));
+    const fonts = requests.filter((x) => /\/fonts\/[^/]+\.woff2$/.test(x));
+    check('the two font files are served by the site itself', fonts.length === 2 && fonts.every((x) => x.startsWith(url)), fonts.join(', '));
+    const head = await page.evaluate(() => {
+      const get = (selector, attribute) => { const node = document.querySelector(selector); return node ? node.getAttribute(attribute) : null; };
+      return {
+        canonical: get('link[rel="canonical"]', 'href'),
+        ogUrl: get('meta[property="og:url"]', 'content'),
+        ogImage: get('meta[property="og:image"]', 'content'),
+        width: get('meta[property="og:image:width"]', 'content'),
+        height: get('meta[property="og:image:height"]', 'content'),
+        alt: get('meta[property="og:image:alt"]', 'content'),
+        twitter: get('meta[name="twitter:card"]', 'content'),
+        robots: get('meta[name="robots"]', 'content'),
+        description: get('meta[name="description"]', 'content'),
+        google: [...document.querySelectorAll('link[href], script[src]')].map((n) => n.getAttribute('href') || n.getAttribute('src')).filter((h) => /google|gstatic/.test(h)),
+      };
+    });
+    const site = content.meta.site_url;
+    check('head: canonical and og:url are the site address, og:image absolute with width, height and the headline as alt, twitter card, description is the subhead',
+      head.canonical === `${site}/` && head.ogUrl === `${site}/` && head.ogImage === `${site}/og-image.png` && head.width === '1200' && head.height === '627' && head.alt === content.intro.headline && head.twitter === 'summary_large_image' && head.robots === null && head.description === content.intro.subhead && head.google.length === 0, JSON.stringify(head));
+    const image = await page.request.get(`${url}/og-image.png`);
+    const png = await image.body();
+    check('og-image.png is served as a PNG of 1200 x 627', image.status() === 200 && png.length > 8 && png.slice(1, 4).toString() === 'PNG' && png.readUInt32BE(16) === 1200 && png.readUInt32BE(20) === 627, `${image.status()} ${png.length} bytes`);
+    await answer(page, new Array(9).fill(5), 3);
+    await grow(page, 'P');
+    const emailLink = await page.evaluate(() => {
+      const note = document.querySelector('.data-note');
+      const a = note.querySelector('a');
+      const rect = a ? a.getBoundingClientRect() : null;
+      return a ? { text: a.textContent, href: a.getAttribute('href'), target: a.getAttribute('target'), rel: a.getAttribute('rel'), note: note.textContent, last: note.lastElementChild === a, height: Math.round(rect.height) } : null;
+    });
+    check('email screen: the "Privacy notice" link right after the data line, opens in a new tab, 44 px tap area',
+      emailLink && emailLink.text === content.privacy.title && emailLink.href === 'privacy/' && emailLink.target === '_blank' && /noopener/.test(emailLink.rel || '') && emailLink.last && emailLink.note.startsWith(content.email_step.data_note) && emailLink.height >= 44, JSON.stringify(emailLink));
+    const [popup] = await Promise.all([context.waitForEvent('page'), page.click('.data-note a')]);
+    await popup.waitForLoadState('networkidle');
+    const notice = await popup.evaluate(() => ({
+      path: location.pathname,
+      title: document.querySelector('h1').textContent,
+      headings: [...document.querySelectorAll('h2')].map((n) => n.textContent),
+      paragraphs: [...document.querySelectorAll('.notice p')].map((n) => n.textContent),
+      items: [...document.querySelectorAll('.notice li')].map((n) => n.textContent),
+      brand: document.querySelector('.notice .brand') ? { href: document.querySelector('.notice .brand').getAttribute('href'), text: document.querySelector('.notice .brand__wordmark').textContent, cells: document.querySelectorAll('.notice .brand__icon span').length } : null,
+      scripts: document.querySelectorAll('script').length,
+      mailto: [...document.querySelectorAll('a[href^="mailto:"]')].map((a) => a.getAttribute('href')),
+    }));
+    const expectedParagraphs = [content.privacy.intro, ...content.privacy.sections.flatMap((s) => s.paragraphs || [])];
+    const expectedItems = content.privacy.sections.flatMap((s) => s.items || []);
+    check('the notice opens in a new tab at /privacy/: title, every heading, paragraph and point word for word from the yaml, no script',
+      notice.path.endsWith('/privacy/') && notice.title === content.privacy.title && JSON.stringify(notice.headings) === JSON.stringify(content.privacy.sections.map((s) => s.heading)) && JSON.stringify(notice.paragraphs) === JSON.stringify(expectedParagraphs) && JSON.stringify(notice.items) === JSON.stringify(expectedItems) && notice.scripts === 0, JSON.stringify(notice).slice(0, 400));
+    check('the notice: the brand sign and wordmark lead back to the survey, the email address is a mailto link', notice.brand && notice.brand.href === '../' && notice.brand.text === content.intro.wordmark && notice.brand.cells === 9 && notice.mailto.length >= 1 && notice.mailto.every((h) => h === 'mailto:contact@juliakrylova.com'), JSON.stringify({ brand: notice.brand, mailto: notice.mailto }));
+    const stillEmail = await page.evaluate(() => document.getElementById('app').dataset.step);
+    check('the survey tab keeps the email screen while the notice is open', stillEmail === 'email', stillEmail);
+    await popup.close();
+    await fillEmail(page, PERSON);
+    await submit(page);
+    await waitStep(page, 'result');
+    await page.waitForTimeout(RESULT_SETTLE_MS);
+    const footer = await page.evaluate(() => {
+      const a = document.querySelector('.signature a');
+      return { legal: a ? a.parentElement.textContent : null, href: a && a.getAttribute('href'), target: a && a.getAttribute('target'), rel: a && a.getAttribute('rel'), height: a ? Math.round(a.getBoundingClientRect().height) : 0 };
+    });
+    check('result footer: "Mastermind Global B.V. · KVK 88166473 · Amsterdam" with the privacy link beside it, opening a new tab',
+      content.result.legal_line === 'Mastermind Global B.V. · KVK 88166473 · Amsterdam' && footer.legal === `${content.result.legal_line} · ${content.privacy.title}` && footer.href === 'privacy/' && footer.target === '_blank' && /noopener/.test(footer.rel || '') && footer.height >= 44, JSON.stringify(footer));
+    const googleLater = requests.filter((x) => GOOGLE.test(x));
+    check('no request to a Google domain during the whole walk (the endpoint of this build is local)', googleLater.length === 0, googleLater.join(', '));
+    await context.close();
+    const direct = await open(MOBILE, '/privacy/');
+    const ok = await direct.page.evaluate(() => ({
+      title: document.title,
+      canonical: document.querySelector('link[rel="canonical"]').getAttribute('href'),
+      icon: document.querySelector('link[rel="icon"]').getAttribute('href'),
+      headingFont: getComputedStyle(document.querySelector('h1')).fontFamily,
+      bodyFont: getComputedStyle(document.querySelector('.notice p')).fontFamily,
+      background: getComputedStyle(document.body).backgroundColor,
+      scrollWidth: document.documentElement.scrollWidth,
+      inner: document.documentElement.clientWidth,
+      gutter: Math.round(document.querySelector('.notice h1').getBoundingClientRect().left),
+    }));
+    check('the notice on its own at 390: title, canonical, relative icon, Lora headings and Inter text on porcelain, the site gutter, no horizontal scroll',
+      ok.title === `${content.privacy.title} | ${content.meta.title}` && ok.canonical === `${content.meta.site_url}/privacy/` && ok.icon === '../favicon.svg' && /Lora/.test(ok.headingFont) && /Inter/.test(ok.bodyFont) && ok.background === 'rgb(250, 248, 245)' && ok.scrollWidth === ok.inner && ok.gutter === 24, JSON.stringify(ok));
+    const googleNotice = direct.requests.filter((x) => GOOGLE.test(x));
+    check('the notice: no request to a Google domain', googleNotice.length === 0, googleNotice.join(', '));
+    await direct.context.close();
+    const previewContext = await browser.newContext(MOBILE);
+    const preview = await previewContext.newPage();
+    const statuses = [];
+    preview.on('response', (response) => statuses.push([response.url(), response.status()]));
+    await preview.goto(`${url}${PREVIEW_BASE}/privacy/`, { waitUntil: 'networkidle' });
+    const previewTitle = await preview.evaluate(() => document.querySelector('h1').textContent);
+    const previewAssets = statuses.filter(([u]) => u.startsWith(`${url}${PREVIEW_BASE}/`));
+    check('the notice works under the /mosaic-snapshot/ preview path with relative assets', previewTitle === content.privacy.title && previewAssets.length >= 3 && previewAssets.every(([, status]) => status === 200), JSON.stringify(previewAssets));
+    await previewContext.close();
+  });
+
   // ---------- tablet portrait keeps the phone design ----------
   await section('tablet', async () => {
     const { page, context } = await open({ viewport: { width: 834, height: 1194 }, isMobile: true, hasTouch: true });
@@ -1121,7 +1232,8 @@ try {
     const tmp = await mkdtemp(path.join(os.tmpdir(), 'mosaic-send-'));
     const capture = await startServer(0, tmp);
     try {
-      await build({ distDir: tmp, endpointUrl: `${capture.url}/__endpoint`, backend: false, quiet: true });
+      // unpublished here, so that the sample result exists for the "sends nothing" check below
+      await build({ distDir: tmp, endpointUrl: `${capture.url}/__endpoint`, backend: false, quiet: true, patch: (c) => { c.meta.published = false; } });
       const posts = async () => (await (await fetch(`${capture.url}/__endpoint`)).json());
       const clear = () => fetch(`${capture.url}/__endpoint?clear=1`);
       const sendContext = await browser.newContext(MOBILE);

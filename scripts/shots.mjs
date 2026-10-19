@@ -134,6 +134,11 @@ export const SCENARIOS = [
 
 export async function takeShots({ outDir = DEFAULT_OUT_DIR, viewports = VIEWPORTS, scenarios = SCENARIOS } = {}) {
   await mkdir(outDir, { recursive: true });
+  // ?sample does nothing once published, so that scenario is skipped then
+  if (content.meta.published && scenarios.some((s) => s.id === '10-result-sample')) {
+    console.log('10-result-sample skipped: meta.published is true');
+    scenarios = scenarios.filter((s) => s.id !== '10-result-sample');
+  }
   const { server, url } = await startServer(0);
   const browser = await chromium.launch();
   const problems = [];

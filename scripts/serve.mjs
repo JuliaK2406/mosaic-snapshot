@@ -21,6 +21,7 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
+  '.woff2': 'font/woff2',
 };
 
 export function createStaticServer(dir = DIST) {
@@ -65,6 +66,7 @@ export function createStaticServer(dir = DIST) {
       res.writeHead(200, {
         'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream',
         'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',   // fonts for the link card, drawn from a page without an origin
       });
       res.end(await readFile(file));
     } catch (error) {

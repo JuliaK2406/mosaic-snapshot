@@ -2,10 +2,10 @@
 # Edit the text after the colons. Keep field names and indentation as they are.
 
 meta:
-  published: false   # false = hidden from search engines and the sample result opens via ?sample. Set true on launch day
+  published: true   # true since 19 October 2026: indexable, no robots.txt, ?sample does nothing. false = hidden from search engines, sample result at ?sample
   site_url: https://mosaic.juliakrylova.com
   title: "Mosaic of Life Snapshot | Julia Krylova"
-  description: "A two-minute self-assessment across the three pillars of the Mosaic of Life: your foundation, your professional path and your visibility."
+  description: "A two-minute self-assessment for ambitious women leaders juggling work, personal priorities and their next ambitions"
 
 links:
   calendly: https://calendly.com/juliakrylova/30min
@@ -130,7 +130,7 @@ result:
   retake_label: "Retake the Snapshot"
   signature_name: "Julia Krylova"
   signature_title: "Strategic Mentor for Women Leaders · Founder, Mosaic of Life"
-  legal_line: "Mastermind Global B.V. · KVK 88166473"
+  legal_line: "Mastermind Global B.V. · KVK 88166473 · Amsterdam"
 
 results:
   F:
@@ -241,3 +241,25 @@ email:   # the result email. Draft wording, waiting for Julia's OK
   closing: "Warmly,"
   why_line: "You are receiving this email because you asked for your result at mosaic.juliakrylova.com."
   notify_subject: "New Mosaic Snapshot: {name}, {result}"   # optional alert to Julia about each new response
+
+privacy:   # the data notice at /privacy/, approved by Julia on 19 October 2026. The title is also the link text on the email screen and in the result footer
+  title: "Privacy notice"
+  intro: "The Mosaic of Life Snapshot is run by Mastermind Global B.V. (KVK 88166473), Amsterdam, the Netherlands. If you have any questions about your data, write to contact@juliakrylova.com."
+  sections:   # each section: heading, then paragraphs (one dash per paragraph) or items (the points of a list)
+    - heading: "What we collect"
+      paragraphs:
+        - "Your first name and email address, your answers to the 12 statements, your priority area and your result, whether you ticked the newsletter box, when you took the Snapshot and which link or QR code brought you to it."
+    - heading: "Why we use it"
+      items:
+        - "To show your result and email you a copy, because you asked for it."
+        - "To send you occasional letters from Julia, only if you ticked the box (your consent). Every letter has an unsubscribe link."
+        - "To look at overall, anonymous statistics that help us improve the Snapshot (our legitimate interest). They contain no names or email addresses."
+    - heading: "Who helps us"
+      paragraphs:
+        - "Google stores the responses (Google Sheets and Apps Script). Brevo sends the emails and manages the newsletter list. GitHub hosts this page. Where these providers process data outside the EU, they use the safeguards required by the GDPR. We never sell your data. This page sets no cookies and uses no tracking."
+    - heading: "How long we keep it"
+      paragraphs:
+        - "Up to two years after you take the Snapshot, unless you ask us to delete it sooner. If you subscribed, we keep your email address until you unsubscribe."
+    - heading: "Your rights"
+      paragraphs:
+        - "You can ask to see, correct, delete or transfer your data, or to limit or object to how we use it, and you can withdraw your consent at any time. Just write to contact@juliakrylova.com. If you are unhappy with how we handle your data, please tell us first so we can put it right. You also have the right to complain to the Dutch Data Protection Authority (Autoriteit Persoonsgegevens)."
